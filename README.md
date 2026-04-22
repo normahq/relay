@@ -9,7 +9,7 @@ It gives you one authenticated owner channel, root orchestration in direct chat,
 ## Install
 
 ```bash
-go install github.com/normahq/relay/cmd/relay@latest
+npm install -g -y @normahq/relay
 ```
 
 ## Quickstart
