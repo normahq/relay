@@ -44,7 +44,7 @@ func TestWorkspaceMCPImport_UsesPersistedSessionMetadata(t *testing.T) {
 	}
 
 	manager := &Manager{
-		workspaces:       relayagent.NewWorkspaceManager(workingDir, "master"),
+		workspaces:       relayagent.NewWorkspaceManager(workingDir, t.TempDir(), "master"),
 		workspaceEnabled: true,
 		logger:           zerolog.Nop(),
 		sessionStore:     store,
@@ -94,7 +94,7 @@ func TestWorkspaceMCPExport_UsesPersistedSessionMetadata(t *testing.T) {
 	}
 
 	manager := &Manager{
-		workspaces:       relayagent.NewWorkspaceManager(workingDir, "master"),
+		workspaces:       relayagent.NewWorkspaceManager(workingDir, t.TempDir(), "master"),
 		workspaceEnabled: true,
 		logger:           zerolog.Nop(),
 		sessionStore:     store,

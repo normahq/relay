@@ -34,7 +34,7 @@ func TestWorkspaceImportDiscardsDirtyChangesAndSyncsToMaster(t *testing.T) {
 	runGit(t, ctx, workingDir, "add", "master-only.txt")
 	runGit(t, ctx, workingDir, "commit", "-m", "chore: update master")
 
-	m := NewWorkspaceManager(workingDir, currentBranch(t, ctx, workingDir))
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
 	if err := m.Import(ctx, workspaceDir); err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -82,7 +82,7 @@ func TestWorkspaceImportRebasesCleanBranch(t *testing.T) {
 	runGit(t, ctx, workingDir, "add", "master.txt")
 	runGit(t, ctx, workingDir, "commit", "-m", "chore: master change")
 
-	m := NewWorkspaceManager(workingDir, currentBranch(t, ctx, workingDir))
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
 	if err := m.Import(ctx, workspaceDir); err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -123,13 +123,51 @@ func TestWorkspaceImportUsesCurrentHeadBranchNotHardcodedMaster(t *testing.T) {
 	runGit(t, ctx, workingDir, "add", "main-only.txt")
 	runGit(t, ctx, workingDir, "commit", "-m", "chore: update main")
 
-	m := NewWorkspaceManager(workingDir, currentBranch(t, ctx, workingDir))
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
 	if err := m.Import(ctx, workspaceDir); err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
 
 	if got := readFile(t, filepath.Join(workspaceDir, "main-only.txt")); got != "main-only\n" {
 		t.Fatalf("main-only.txt mismatch: got %q", got)
+	}
+}
+
+func TestEnsureWorkspace_UsesStateDirRelaySessionsRoot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workingDir := t.TempDir()
+	initGitRepo(t, ctx, workingDir)
+
+	writeFile(t, filepath.Join(workingDir, "seed.txt"), "seed\n")
+	runGit(t, ctx, workingDir, "add", "seed.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: seed")
+
+	stateDir := t.TempDir()
+	sessionID := "tg-4-5"
+	branchName := "norma/relay/tg-4-5"
+
+	m := NewWorkspaceManager(workingDir, stateDir, currentBranch(t, ctx, workingDir))
+	workspaceDir, err := m.EnsureWorkspace(ctx, sessionID, branchName, "")
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
+	})
+
+	want := filepath.Join(stateDir, "relay-sessions", sessionID)
+	if workspaceDir != want {
+		t.Fatalf("workspaceDir = %q, want %q", workspaceDir, want)
+	}
+	if _, err := os.Stat(workspaceDir); err != nil {
+		t.Fatalf("stat workspaceDir %q: %v", workspaceDir, err)
+	}
+
+	legacyPath := filepath.Join(workingDir, ".norma", "relay-sessions", sessionID)
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy .norma workspace path exists at %q, err=%v", legacyPath, err)
 	}
 }
 
@@ -159,7 +197,7 @@ func TestWorkspaceImportAbortsRebaseOnConflict(t *testing.T) {
 	runGit(t, ctx, workingDir, "add", "conflict.txt")
 	runGit(t, ctx, workingDir, "commit", "-m", "chore: master conflict")
 
-	m := NewWorkspaceManager(workingDir, currentBranch(t, ctx, workingDir))
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
 	err := m.Import(ctx, workspaceDir)
 	if err == nil {
 		t.Fatal("Import() error = nil, want conflict error")
@@ -210,7 +248,7 @@ func TestWorkspaceExportSquashMergesIntoConfiguredBaseBranch(t *testing.T) {
 	runGit(t, ctx, workspaceDir, "add", "feature.txt")
 	runGit(t, ctx, workspaceDir, "commit", "-m", "feat: branch feature")
 
-	m := NewWorkspaceManager(workingDir, "main")
+	m := NewWorkspaceManager(workingDir, t.TempDir(), "main")
 	if err := m.Export(ctx, workspaceDir, branchName, "feat: export relay changes"); err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
@@ -251,7 +289,7 @@ func TestWorkspaceExportFailsWhenBaseBranchMismatch(t *testing.T) {
 
 	runGit(t, ctx, workingDir, "checkout", "-b", "develop")
 
-	m := NewWorkspaceManager(workingDir, "main")
+	m := NewWorkspaceManager(workingDir, t.TempDir(), "main")
 	err := m.Export(ctx, workspaceDir, branchName, "feat: export relay changes")
 	if err == nil {
 		t.Fatal("Export() error = nil, want branch mismatch error")

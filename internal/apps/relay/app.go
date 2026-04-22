@@ -22,6 +22,7 @@ import (
 	"github.com/normahq/relay/internal/apps/relay/tgbotkit"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
 	"github.com/normahq/relay/internal/git"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/tgbotkit/runtime"
 	"github.com/tgbotkit/runtime/updatepoller"
@@ -104,6 +105,12 @@ func Module(
 			mcpReg,
 		),
 		fx.Provide(
+			fx.Annotate(
+				func() string { return stateDir },
+				fx.ResultTags(`name:"relay_state_dir"`),
+			),
+		),
+		fx.Provide(
 			func() *runtimecfg.Loader {
 				return runtimecfg.NewLoader(runtimeLoadOpts, defaultsYAML)
 			},
@@ -145,6 +152,7 @@ func Module(
 					if err != nil {
 						return false, err
 					}
+					warnLegacyWorkspaceDir(logger, workingDir, stateDir, enabled)
 					logger.Info().
 						Str("workspace_mode", string(mode)).
 						Bool("workspace_enabled", enabled).
@@ -367,6 +375,31 @@ func resolveStateDir(workingDir, raw string) (string, error) {
 		return "", fmt.Errorf("resolve absolute state_dir %q: %w", raw, err)
 	}
 	return filepath.Clean(resolved), nil
+}
+
+func warnLegacyWorkspaceDir(logger zerolog.Logger, workingDir, stateDir string, workspaceEnabled bool) {
+	if !workspaceEnabled {
+		return
+	}
+
+	legacyDir := filepath.Join(workingDir, ".norma", "relay-sessions")
+	newDir := filepath.Join(stateDir, "relay-sessions")
+	if filepath.Clean(legacyDir) == filepath.Clean(newDir) {
+		return
+	}
+
+	fi, err := os.Stat(legacyDir)
+	if err != nil {
+		return
+	}
+	if !fi.IsDir() {
+		return
+	}
+
+	logger.Warn().
+		Str("legacy_workspace_dir", legacyDir).
+		Str("workspace_dir", newDir).
+		Msg("legacy relay workspace directory detected and ignored")
 }
 
 func resolveWorkspaceBaseBranch(

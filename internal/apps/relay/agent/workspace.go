@@ -13,15 +13,17 @@ import (
 
 // WorkspaceManager manages git worktrees for relay sessions.
 type WorkspaceManager struct {
-	workingDir string
-	baseBranch string
+	workingDir    string
+	workspacesDir string
+	baseBranch    string
 }
 
 // NewWorkspaceManager creates a WorkspaceManager for the given working directory.
-func NewWorkspaceManager(workingDir, baseBranch string) *WorkspaceManager {
+func NewWorkspaceManager(workingDir, stateDir, baseBranch string) *WorkspaceManager {
 	return &WorkspaceManager{
-		workingDir: workingDir,
-		baseBranch: strings.TrimSpace(baseBranch),
+		workingDir:    workingDir,
+		workspacesDir: filepath.Join(strings.TrimSpace(stateDir), "relay-sessions"),
+		baseBranch:    strings.TrimSpace(baseBranch),
 	}
 }
 
@@ -29,15 +31,13 @@ func NewWorkspaceManager(workingDir, baseBranch string) *WorkspaceManager {
 // If existingPath is non-empty and the directory exists, it is reused and synced with base.
 // Otherwise a new worktree is mounted at workspacesDir/<key> using branch <branchName>.
 func (m *WorkspaceManager) EnsureWorkspace(ctx context.Context, key, branchName, existingPath string) (string, error) {
-	relayDir := filepath.Join(m.workingDir, ".norma")
-	workspacesDir := filepath.Join(relayDir, "relay-sessions")
-	if err := os.MkdirAll(workspacesDir, 0o755); err != nil {
+	if err := os.MkdirAll(m.workspacesDir, 0o755); err != nil {
 		return "", fmt.Errorf("create workspaces dir: %w", err)
 	}
 
 	workspaceDir := existingPath
 	if strings.TrimSpace(workspaceDir) == "" {
-		workspaceDir = filepath.Join(workspacesDir, key)
+		workspaceDir = filepath.Join(m.workspacesDir, key)
 	}
 
 	if fi, err := os.Stat(workspaceDir); err == nil && fi.IsDir() {

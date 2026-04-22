@@ -217,7 +217,7 @@ func TestStopAll_CleansWorkspaceWhenRootContextCanceled(t *testing.T) {
 	rootCancel()
 
 	m := &Manager{
-		workspaces:       relayagent.NewWorkspaceManager(workingDir, "master"),
+		workspaces:       relayagent.NewWorkspaceManager(workingDir, t.TempDir(), "master"),
 		workspaceEnabled: true,
 		logger:           zerolog.Nop(),
 		rootCtx:          rootCtx,
@@ -519,7 +519,7 @@ func TestStopSessionByID_PersistedSessionCleansWorkspace(t *testing.T) {
 	}
 
 	m := &Manager{
-		workspaces:       relayagent.NewWorkspaceManager(workingDir, "master"),
+		workspaces:       relayagent.NewWorkspaceManager(workingDir, t.TempDir(), "master"),
 		workspaceEnabled: true,
 		logger:           zerolog.Nop(),
 		sessionStore:     store,

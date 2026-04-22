@@ -59,6 +59,7 @@ type ManagerParams struct {
 	RuntimeMCPIDs     []string `name:"relay_runtime_mcp_server_ids"`
 	RootProviderID    string   `name:"relay_provider"`
 	WorkingDir        string
+	StateDir          string `name:"relay_state_dir"`
 	WorkspaceEnabled  bool   `name:"relay_workspace_enabled"`
 	WorkspaceBaseRef  string `name:"relay_workspace_base_branch"`
 	StateProvider     relaystate.Provider
@@ -80,7 +81,7 @@ func NewManager(p ManagerParams) (*Manager, error) {
 		runtimeMCPIDs:     stringSet(p.RuntimeMCPIDs),
 		rootAgentName:     strings.TrimSpace(p.RootProviderID),
 		workingDir:        p.WorkingDir,
-		workspaces:        relayagent.NewWorkspaceManager(p.WorkingDir, p.WorkspaceBaseRef),
+		workspaces:        relayagent.NewWorkspaceManager(p.WorkingDir, p.StateDir, p.WorkspaceBaseRef),
 		workspaceEnabled:  p.WorkspaceEnabled,
 		workspaceBaseRef:  p.WorkspaceBaseRef,
 		sessionStore:      p.StateProvider.Sessions(),
