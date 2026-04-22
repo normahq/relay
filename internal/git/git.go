@@ -1,0 +1,74 @@
+package git
+
+import (
+	"context"
+	"fmt"
+	"os/exec"
+	"strings"
+
+	"github.com/rs/zerolog/log"
+)
+
+// Available checks if the given directory is inside a git work tree.
+func Available(ctx context.Context, workingDir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = workingDir
+	return cmd.Run() == nil
+}
+
+// GitRunCmd runs a git command and returns its output. It logs a warning on error.
+func GitRunCmd(ctx context.Context, dir string, name string, args ...string) string {
+	log.Debug().Str("dir", dir).Str("cmd", name).Strs("args", args).Msg("running git command")
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		log.Warn().Err(err).Str("dir", dir).Str("cmd", name).Strs("args", args).Msg("git command failed")
+	}
+	return string(out)
+}
+
+// GitRunCmdOutput runs a git command and returns its combined stdout/stderr output.
+func GitRunCmdOutput(ctx context.Context, dir string, name string, args ...string) (string, error) {
+	log.Debug().Str("dir", dir).Str("cmd", name).Strs("args", args).Msg("running git command (output return)")
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Use %v instead of %w for CombinedOutput to avoid exposing exec.ExitError
+		// and include the output in the error message for better context.
+		return "", fmt.Errorf("git %s: %v: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+// GitRunCmdErr runs a git command and returns an error if it fails.
+func GitRunCmdErr(ctx context.Context, dir string, name string, args ...string) error {
+	log.Debug().Str("dir", dir).Str("cmd", name).Strs("args", args).Msg("running git command (err return)")
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %v: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CurrentBranch returns the current active branch in the repository.
+func CurrentBranch(ctx context.Context, workingDir string) (string, error) {
+	if !Available(ctx, workingDir) {
+		return "", fmt.Errorf("not a git repository: %s", workingDir)
+	}
+	out, err := GitRunCmdOutput(ctx, workingDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve base branch: %w", err)
+	}
+	branch := strings.TrimSpace(out)
+	if branch == "" {
+		return "", fmt.Errorf("resolve base branch: empty branch name")
+	}
+	if branch == "HEAD" {
+		return "", fmt.Errorf("resolve base branch: detached HEAD")
+	}
+	return branch, nil
+}
