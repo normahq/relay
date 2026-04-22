@@ -291,6 +291,63 @@ func TestInitCommand_FailsWhenConfigAlreadyExists(t *testing.T) {
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	gitignorePath := filepath.Join(workingDir, relayConfigRelDir, ".gitignore")
+	content, readErr := os.ReadFile(gitignorePath)
+	if readErr != nil {
+		t.Fatalf("read %s: %v", gitignorePath, readErr)
+	}
+	if got, want := string(content), relayConfigGitignoreContent; got != want {
+		t.Fatalf("%s content = %q, want %q", gitignorePath, got, want)
+	}
+}
+
+func TestInitCommand_PreservesExistingConfigGitignore(t *testing.T) {
+	workingDir := setWorkingDir(t)
+	setDetectedBinaries(t, "codex")
+	setDetectedBaseBranch(t, "main", nil)
+	setRelayInitBotIdentityLoader(t, func(_ context.Context, token string) (botIdentity, error) {
+		if strings.TrimSpace(token) == "" {
+			return botIdentity{}, fmt.Errorf("missing token")
+		}
+		return botIdentity{username: "NormaBot", name: "Norma Relay"}, nil
+	})
+
+	customGitignore := "# keep local state files for this repo\n*\n!.gitignore\n"
+	gitignorePath := filepath.Join(workingDir, relayConfigRelDir, ".gitignore")
+	if err := os.MkdirAll(filepath.Dir(gitignorePath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(gitignorePath, []byte(customGitignore), 0o600); err != nil {
+		t.Fatalf("write existing .gitignore: %v", err)
+	}
+
+	prevInput := relayInitInput
+	prevOutput := relayInitOutput
+	prevInteractive := relayInitIsInteractive
+	t.Cleanup(func() {
+		relayInitInput = prevInput
+		relayInitOutput = prevOutput
+		relayInitIsInteractive = prevInteractive
+	})
+
+	relayInitInput = strings.NewReader("tg-token\n")
+	relayInitOutput = &bytes.Buffer{}
+	relayInitIsInteractive = func() bool { return false }
+
+	cmd := initCommand()
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", gitignorePath, err)
+	}
+	if got := string(content); got != customGitignore {
+		t.Fatalf("%s content = %q, want %q", gitignorePath, got, customGitignore)
+	}
 }
 
 func TestInitCommand_RemovedRelayProviderFlagRejected(t *testing.T) {
@@ -605,7 +662,7 @@ func assertRelayInitArtifacts(t *testing.T, workingDir string) {
 	if err != nil {
 		t.Fatalf("read %s: %v", gitignorePath, err)
 	}
-	if got, want := string(content), "*\n!.gitignore\n!config.yaml\n"; got != want {
+	if got, want := string(content), relayConfigGitignoreContent; got != want {
 		t.Fatalf("%s content = %q, want %q", gitignorePath, got, want)
 	}
 

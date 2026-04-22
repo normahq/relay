@@ -23,6 +23,8 @@ const (
 	relayDotEnvFileName   = ".env"
 )
 
+const relayConfigGitignoreContent = "*\n!.gitignore\n"
+
 const (
 	relayInitCodexModel      = "gpt-5.3-codex"
 	relayInitClaudeCodeModel = "claude-sonnet-4-6"
@@ -76,15 +78,15 @@ func initCommand() *cobra.Command {
 			if err := os.MkdirAll(relayConfigDir, 0o700); err != nil {
 				return fmt.Errorf("create relay config directory: %w", err)
 			}
+			if err := ensureRelayConfigGitignore(relayConfigDir); err != nil {
+				return err
+			}
 
 			configPath := filepath.Join(relayConfigDir, relayConfigFileName)
 			if _, err := os.Stat(configPath); err == nil {
 				return fmt.Errorf("%s already exists", configPath)
 			} else if !os.IsNotExist(err) {
 				return fmt.Errorf("stat %s: %w", configPath, err)
-			}
-			if err := writeRelayConfigGitignore(relayConfigDir); err != nil {
-				return err
 			}
 
 			doc, agentIDs, err := buildRelayInitDocument(workingDir)
@@ -161,10 +163,14 @@ func initCommand() *cobra.Command {
 	return cmd
 }
 
-func writeRelayConfigGitignore(configDir string) error {
+func ensureRelayConfigGitignore(configDir string) error {
 	gitignorePath := filepath.Join(configDir, ".gitignore")
-	content := []byte("*\n!.gitignore\n!config.yaml\n")
-	if err := os.WriteFile(gitignorePath, content, 0o600); err != nil {
+	if _, err := os.Stat(gitignorePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %w", gitignorePath, err)
+	}
+	if err := os.WriteFile(gitignorePath, []byte(relayConfigGitignoreContent), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", gitignorePath, err)
 	}
 	return nil
