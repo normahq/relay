@@ -180,7 +180,8 @@ Relay lazy-restores a topic session on first message after restart when metadata
 ## Message Flow
 
 1. User sends Telegram message.
-   - In non-DM chats (groups/supergroups/topics), relay processes the message only when it starts with `@<bot_username>` or it is a reply to this bot's message.
+   - In non-DM chats (groups/supergroups/topics), relay starts a new thread session only when the message starts with `@<bot_username>` or is a reply to this bot's message.
+   - For an already-known thread (`message_thread_id`) with an active or persisted relay session, relay accepts follow-up messages without requiring repeated mentions/replies.
 2. Relay resolves session by `(chat_id, topic_id)`.
 3. If topic session is missing in memory, relay attempts lazy restore from persisted metadata.
 4. Relay calls ADK runner for that session.
@@ -219,22 +220,23 @@ Both paths create:
 
 - built-in server ID: `relay`
 - `relay.agents.start`
-  - input: `agent_name`
-  - optional input: `locator`
-    - relay-mounted agents should omit `locator` so the current caller session context is used automatically
-    - external callers can provide `locator.channel_type` plus `locator.address`
-    - Telegram locator example: `{"channel_type":"telegram","address":{"chat_id":123456}}`
+  - required input: `agent_name`, `locator`
+  - `locator` must include `locator.channel_type` plus `locator.address`
+  - Telegram locator example: `{"channel_type":"telegram","address":{"chat_id":123456}}`
+  - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`
+  - caller scope enforcement: start target `chat_id` must match caller session chat
   - output: structured session object including `channel_type`, `address_key`, `session_id`, `chat_id`, `topic_id`, `agent_name`, `description`, `mcp_servers`
 - `relay.agents.stop`
   - input: `session_id`
+  - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`
+  - actor scope: caller may mutate only sessions owned by the same session user
+  - legacy sessions with unknown owner can be mutated only by relay owner
 - `relay.agents.list`
   - output: structured `agents[]` entries, including persisted sessions with `status=persisted`
 - `relay.agents.get`
   - input: `session_id`
   - output: structured `agent` object
 - Deprecated aliases (still supported): `relay.agents.stop_agent`, `relay.agents.list_agents`, `relay.agents.get_agent`
-
-Relay agents should prefer `relay.agents.start` without a locator when they spawn subagents from the current chat context.
 
 ## Workspace MCP Usage
 

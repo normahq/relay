@@ -47,7 +47,7 @@ func TestBundledRelayServerInstructionsReflectWorkspaceMode(t *testing.T) {
 	if !strings.Contains(enabled, "relay.workspace is available") {
 		t.Fatalf("bundledRelayServerInstructions(true) = %q, want workspace-enabled guidance", enabled)
 	}
-	if !strings.Contains(enabled, "relay.agents.start uses the current caller session context automatically") {
+	if !strings.Contains(enabled, "relay.agents.start requires explicit locator.channel_type plus locator.address") {
 		t.Fatalf("bundledRelayServerInstructions(true) = %q, want start-context guidance", enabled)
 	}
 

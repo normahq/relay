@@ -198,6 +198,11 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 		return nil
 	}
 
+	h.logger.Debug().
+		Str("message_type", string(event.Type)).
+		Interface("raw_transport_message", event.Message).
+		Msg("received inbound telegram transport message")
+
 	ownerID := h.getOwnerID()
 	chatID := h.getChatID()
 
@@ -222,10 +227,25 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 	topicID := messageCtx.TopicID
 	text := messageCtx.Text
 	if !messageCtx.IsDM {
-		var ok bool
-		text, ok = h.normalizePublicText(messageCtx)
-		if !ok {
-			return nil
+		normalized, ok := h.normalizePublicText(messageCtx)
+		if ok {
+			text = normalized
+		} else {
+			if h.sessionManager == nil {
+				return nil
+			}
+			known, knownErr := h.sessionManager.HasSession(ctx, messageCtx.Locator)
+			if knownErr != nil {
+				h.logger.Warn().
+					Err(knownErr).
+					Str("session_id", messageCtx.Locator.SessionID).
+					Str("address_key", messageCtx.Locator.AddressKey).
+					Msg("failed to check known public thread session")
+				return nil
+			}
+			if messageCtx.TopicID <= 0 || !known {
+				return nil
+			}
 		}
 	}
 	if strings.TrimSpace(text) == "" {
@@ -568,7 +588,9 @@ func (h *RelayHandler) setChatID(chatID int64) {
 }
 
 func (h *RelayHandler) onStart(ctx context.Context) error {
-	h.initializeBotUsername(ctx)
+	if err := h.initializeBotUsername(ctx); err != nil {
+		return fmt.Errorf("resolve relay telegram bot identity: %w", err)
+	}
 
 	if !h.ownerStore.HasOwner() {
 		return nil
@@ -599,42 +621,52 @@ func (h *RelayHandler) onStart(ctx context.Context) error {
 	return nil
 }
 
-func (h *RelayHandler) initializeBotUsername(ctx context.Context) {
+func (h *RelayHandler) initializeBotUsername(ctx context.Context) error {
 	if h.tgClient == nil {
-		return
+		return fmt.Errorf("telegram client is required")
 	}
 
 	meResp, err := h.tgClient.GetMeWithResponse(ctx)
 	if err != nil {
-		h.logger.Warn().Err(err).Msg("getMe failed; bot username unavailable")
-		return
+		return fmt.Errorf("getMe: %w", err)
+	}
+	if meResp == nil {
+		return fmt.Errorf("getMe response is nil")
 	}
 	if meResp.JSON200 == nil {
-		h.logger.Warn().Str("status", meResp.Status()).Msg("getMe response missing result")
-		return
+		if meResp.JSON401 != nil {
+			return fmt.Errorf("getMe unauthorized: %s", strings.TrimSpace(meResp.JSON401.Description))
+		}
+		if meResp.JSON400 != nil {
+			return fmt.Errorf("getMe bad request: %s", strings.TrimSpace(meResp.JSON400.Description))
+		}
+		return fmt.Errorf("getMe response missing result (status %s)", strings.TrimSpace(meResp.Status()))
 	}
 	botUserID := meResp.JSON200.Result.Id
+	if botUserID == 0 {
+		return fmt.Errorf("getMe returned empty bot id")
+	}
 
 	username := ""
 	if meResp.JSON200.Result.Username != nil {
 		username = strings.TrimSpace(*meResp.JSON200.Result.Username)
+	}
+	if username == "" {
+		return fmt.Errorf("getMe returned empty username for bot id %d", botUserID)
 	}
 
 	h.mu.Lock()
 	h.botUserID = botUserID
 	h.botUsername = username
 	h.mu.Unlock()
-	if username == "" {
-		h.logger.Warn().Int64("bot_user_id", botUserID).Msg("getMe returned empty username")
-		return
-	}
 
 	if h.authToken != "" {
 		deeplink := fmt.Sprintf("https://t.me/%s?start=%s", username, h.authToken)
 		h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Str("start_deeplink", deeplink).Msg("relay start deeplink ready")
-		return
+		return nil
 	}
 	h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Msg("relay bot identity loaded")
+	return nil
 }
 
 func (h *RelayHandler) getProviderName() string {

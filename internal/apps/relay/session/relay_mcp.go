@@ -44,24 +44,43 @@ func NewRelayMCPServer(manager *Manager, channel relayChannelRuntime, msg *messe
 	}
 }
 
+type relayActorContext struct {
+	SessionID string
+	UserID    string
+	ChatID    int64
+	IsOwner   bool
+}
+
 func (s *relayMCPServer) StartAgent(ctx context.Context, req relaymcp.StartRequest) (relaymcp.AgentInfo, error) {
 	agentName := strings.TrimSpace(req.AgentName)
-	targetCtx, err := s.resolveStartContext(ctx, req)
+	if agentName == "" {
+		return relaymcp.AgentInfo{}, fmt.Errorf("agent_name is required")
+	}
+
+	actorCtx, err := s.resolveActorContext(ctx, req.CallerSessionID)
 	if err != nil {
 		return relaymcp.AgentInfo{}, err
 	}
-	targetLocator := targetCtx.Locator
-	address, ok, err := targetLocator.TelegramAddress()
+
+	targetLocator, err := sessionLocatorFromStartLocator(req.Locator)
+	if err != nil {
+		return relaymcp.AgentInfo{}, err
+	}
+	targetAddress, ok, err := targetLocator.TelegramAddress()
 	if err != nil {
 		return relaymcp.AgentInfo{}, err
 	}
 	if !ok {
 		return relaymcp.AgentInfo{}, fmt.Errorf("unsupported channel type %q", targetLocator.ChannelType)
 	}
-	chatID := address.ChatID
+	if targetAddress.ChatID != actorCtx.ChatID {
+		return relaymcp.AgentInfo{}, fmt.Errorf("locator.address.chat_id %d is outside caller session chat scope", targetAddress.ChatID)
+	}
 
 	s.logger.Info().
-		Int64("chat_id", chatID).
+		Str("caller_session_id", actorCtx.SessionID).
+		Str("caller_user_id", actorCtx.UserID).
+		Int64("chat_id", targetAddress.ChatID).
 		Str("agent", agentName).
 		Msg("MCP: relay.agents.start called")
 
@@ -69,24 +88,24 @@ func (s *relayMCPServer) StartAgent(ctx context.Context, req relaymcp.StartReque
 		return relaymcp.AgentInfo{}, fmt.Errorf("agent %q not available: %w", agentName, err)
 	}
 
-	locator, err := s.channel.CreateTopicLocator(ctx, chatID, fmt.Sprintf("Relay: %s", agentName))
+	locator, err := s.channel.CreateTopicLocator(ctx, targetAddress.ChatID, fmt.Sprintf("Relay: %s", agentName))
 	if err != nil {
 		s.logger.Error().
 			Err(err).
-			Int64("chat_id", chatID).
+			Int64("chat_id", targetAddress.ChatID).
 			Str("agent", agentName).
 			Msg("MCP: relay.agents.start failed")
 		return relaymcp.AgentInfo{}, err
 	}
 	if err := s.manager.CreateSession(ctx, SessionContext{
 		Locator: locator,
-		UserID:  targetCtx.UserID,
+		UserID:  actorCtx.UserID,
 	}, agentName); err != nil {
 		_ = s.channel.Close(ctx, locator)
 		return relaymcp.AgentInfo{}, err
 	}
 
-	address, ok, err = locator.TelegramAddress()
+	address, ok, err := locator.TelegramAddress()
 	if err != nil {
 		return relaymcp.AgentInfo{}, err
 	}
@@ -100,7 +119,7 @@ func (s *relayMCPServer) StartAgent(ctx context.Context, req relaymcp.StartReque
 		if sendErr := s.channel.SendMarkdown(ctx, locator, welcomeMsg); sendErr != nil {
 			s.logger.Warn().
 				Err(sendErr).
-				Int64("chat_id", chatID).
+				Int64("chat_id", targetAddress.ChatID).
 				Int("topic_id", address.TopicID).
 				Str("agent", agentName).
 				Str("session_id", locator.SessionID).
@@ -109,7 +128,7 @@ func (s *relayMCPServer) StartAgent(ctx context.Context, req relaymcp.StartReque
 	}
 
 	s.logger.Info().
-		Int64("chat_id", chatID).
+		Int64("chat_id", targetAddress.ChatID).
 		Int("topic_id", address.TopicID).
 		Str("agent", agentName).
 		Str("session_id", locator.SessionID).
@@ -119,51 +138,60 @@ func (s *relayMCPServer) StartAgent(ctx context.Context, req relaymcp.StartReque
 		ChannelType: locator.ChannelType,
 		AddressKey:  locator.AddressKey,
 		SessionID:   locator.SessionID,
+		UserID:      actorCtx.UserID,
 		AgentName:   agentName,
-		ChatID:      chatID,
+		ChatID:      targetAddress.ChatID,
 		TopicID:     address.TopicID,
 		Description: agentDesc,
 		MCPServers:  mcpServers,
 	}, nil
 }
 
-func (s *relayMCPServer) resolveStartContext(ctx context.Context, req relaymcp.StartRequest) (SessionContext, error) {
-	if req.Locator != nil {
-		locator, err := sessionLocatorFromStartLocator(req.Locator)
-		if err != nil {
-			return SessionContext{}, err
-		}
-		owner := s.owner()
-		if owner == nil {
-			return SessionContext{}, fmt.Errorf("owner context is required for explicit relay.agents.start locator")
-		}
-		return SessionContext{
-			Locator: locator,
-			UserID:  TelegramUserID(owner.UserID),
-		}, nil
+func (s *relayMCPServer) resolveActorContext(ctx context.Context, callerSessionID string) (relayActorContext, error) {
+	trimmedSessionID := strings.TrimSpace(callerSessionID)
+	if trimmedSessionID == "" {
+		return relayActorContext{}, fmt.Errorf("caller session identity is required")
 	}
 
-	callerSessionID := strings.TrimSpace(req.CallerSessionID)
-	if callerSessionID == "" {
-		return SessionContext{}, fmt.Errorf("locator or caller session context is required")
-	}
-
-	info, err := s.manager.GetSessionInfo(ctx, callerSessionID)
+	info, err := s.manager.GetSessionInfo(ctx, trimmedSessionID)
 	if err != nil {
-		return SessionContext{}, fmt.Errorf("resolve caller session context: %w", err)
+		return relayActorContext{}, fmt.Errorf("resolve caller session context: %w", err)
 	}
+
+	address, ok, err := info.Locator.TelegramAddress()
+	if err != nil {
+		return relayActorContext{}, fmt.Errorf("decode caller session locator: %w", err)
+	}
+	if !ok {
+		return relayActorContext{}, fmt.Errorf("unsupported caller channel type %q", info.ChannelType)
+	}
+
 	userID := strings.TrimSpace(info.UserID)
 	if userID == "" {
-		owner := s.owner()
-		if owner == nil {
-			return SessionContext{}, fmt.Errorf("caller session %q has no active user context and no owner is available", callerSessionID)
-		}
-		userID = TelegramUserID(owner.UserID)
+		return relayActorContext{}, fmt.Errorf("caller session %q has no user identity", trimmedSessionID)
 	}
-	return SessionContext{
-		Locator: info.Locator,
-		UserID:  userID,
+
+	owner := s.owner()
+	return relayActorContext{
+		SessionID: trimmedSessionID,
+		UserID:    userID,
+		ChatID:    address.ChatID,
+		IsOwner:   owner != nil && userID == TelegramUserID(owner.UserID),
 	}, nil
+}
+
+func authorizeActorForSessionMutation(actor relayActorContext, target relaymcp.AgentInfo) error {
+	targetUserID := strings.TrimSpace(target.UserID)
+	if targetUserID == "" {
+		if actor.IsOwner {
+			return nil
+		}
+		return fmt.Errorf("session %q has unknown owner; only relay owner can mutate it", target.SessionID)
+	}
+	if targetUserID != actor.UserID {
+		return fmt.Errorf("session %q is owned by another actor", target.SessionID)
+	}
+	return nil
 }
 
 func sessionLocatorFromStartLocator(locator *relaymcp.StartLocator) (SessionLocator, error) {
@@ -201,8 +229,28 @@ func (s *relayMCPServer) owner() *auth.Owner {
 	return s.owners.GetOwner()
 }
 
-func (s *relayMCPServer) StopAgent(ctx context.Context, sessionID string) error {
-	s.logger.Info().Str("session_id", sessionID).Msg("MCP: relay.agents.stop called")
+func (s *relayMCPServer) StopAgent(ctx context.Context, req relaymcp.StopRequest) error {
+	sessionID := strings.TrimSpace(req.SessionID)
+	callerSessionID := strings.TrimSpace(req.CallerSessionID)
+	s.logger.Info().
+		Str("session_id", sessionID).
+		Str("caller_session_id", callerSessionID).
+		Msg("MCP: relay.agents.stop called")
+
+	actorCtx, err := s.resolveActorContext(ctx, callerSessionID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("session_id", sessionID).Msg("MCP: relay.agents.stop failed")
+		return err
+	}
+	info, err := s.GetSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("session_id", sessionID).Msg("MCP: relay.agents.stop failed")
+		return err
+	}
+	if err := authorizeActorForSessionMutation(actorCtx, info); err != nil {
+		s.logger.Error().Err(err).Str("session_id", sessionID).Msg("MCP: relay.agents.stop denied")
+		return err
+	}
 
 	if err := s.manager.StopSessionByID(ctx, sessionID); err != nil {
 		s.logger.Error().Err(err).Str("session_id", sessionID).Msg("MCP: relay.agents.stop failed")
@@ -227,6 +275,7 @@ func (s *relayMCPServer) ListAgents(ctx context.Context) ([]relaymcp.AgentInfo, 
 			ChannelType: info.ChannelType,
 			AddressKey:  info.Locator.AddressKey,
 			SessionID:   info.SessionID,
+			UserID:      info.UserID,
 			AgentName:   info.AgentName,
 			ChatID:      info.ChatID,
 			TopicID:     info.TopicID,
@@ -250,6 +299,7 @@ func (s *relayMCPServer) GetSession(ctx context.Context, sessionID string) (rela
 		ChannelType: info.ChannelType,
 		AddressKey:  info.Locator.AddressKey,
 		SessionID:   info.SessionID,
+		UserID:      info.UserID,
 		AgentName:   info.AgentName,
 		ChatID:      info.ChatID,
 		TopicID:     info.TopicID,

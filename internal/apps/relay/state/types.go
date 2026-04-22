@@ -56,6 +56,7 @@ type CollaboratorStore interface {
 // SessionRecord persists relay session metadata for lazy restore.
 type SessionRecord struct {
 	SessionID    string
+	UserID       string
 	ChannelType  string
 	AddressKey   string
 	AddressJSON  string

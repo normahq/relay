@@ -42,10 +42,11 @@ func (s *sqliteSessionStore) Upsert(ctx context.Context, record SessionRecord) e
 
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO relay_session_metadata (
-			session_id, chat_id, topic_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status, updated_at
+			session_id, user_id, chat_id, topic_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
+			user_id = excluded.user_id,
 			chat_id = excluded.chat_id,
 			topic_id = excluded.topic_id,
 			channel_type = excluded.channel_type,
@@ -57,6 +58,7 @@ func (s *sqliteSessionStore) Upsert(ctx context.Context, record SessionRecord) e
 			status = excluded.status,
 			updated_at = excluded.updated_at`,
 		sessionID,
+		strings.TrimSpace(record.UserID),
 		chatID,
 		topicID,
 		channelType,
@@ -76,7 +78,7 @@ func (s *sqliteSessionStore) Upsert(ctx context.Context, record SessionRecord) e
 
 func (s *sqliteSessionStore) GetByAddress(ctx context.Context, channelType, addressKey string) (SessionRecord, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT session_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
+		SELECT session_id, user_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
 		FROM relay_session_metadata
 		WHERE channel_type = ? AND address_key = ?`,
 		strings.TrimSpace(channelType), strings.TrimSpace(addressKey),
@@ -85,6 +87,7 @@ func (s *sqliteSessionStore) GetByAddress(ctx context.Context, channelType, addr
 	var record SessionRecord
 	if err := row.Scan(
 		&record.SessionID,
+		&record.UserID,
 		&record.ChannelType,
 		&record.AddressKey,
 		&record.AddressJSON,
@@ -104,7 +107,7 @@ func (s *sqliteSessionStore) GetByAddress(ctx context.Context, channelType, addr
 
 func (s *sqliteSessionStore) GetBySessionID(ctx context.Context, sessionID string) (SessionRecord, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT session_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
+		SELECT session_id, user_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
 		FROM relay_session_metadata
 		WHERE session_id = ?`,
 		strings.TrimSpace(sessionID),
@@ -113,6 +116,7 @@ func (s *sqliteSessionStore) GetBySessionID(ctx context.Context, sessionID strin
 	var record SessionRecord
 	if err := row.Scan(
 		&record.SessionID,
+		&record.UserID,
 		&record.ChannelType,
 		&record.AddressKey,
 		&record.AddressJSON,
@@ -148,7 +152,7 @@ func (s *sqliteSessionStore) DeleteBySessionID(ctx context.Context, sessionID st
 
 func (s *sqliteSessionStore) List(ctx context.Context) ([]SessionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
+		SELECT session_id, user_id, channel_type, address_key, address_json, agent_name, workspace_dir, branch_name, status
 		FROM relay_session_metadata
 		ORDER BY updated_at DESC`)
 	if err != nil {
@@ -161,6 +165,7 @@ func (s *sqliteSessionStore) List(ctx context.Context) ([]SessionRecord, error) 
 		var record SessionRecord
 		if err := rows.Scan(
 			&record.SessionID,
+			&record.UserID,
 			&record.ChannelType,
 			&record.AddressKey,
 			&record.AddressJSON,

@@ -48,7 +48,7 @@ func bundledRelayServerInstructions(workspaceEnabled bool) string {
 
 - relay.state stores persistent relay session and app state in relay.db.
 - relay.agents manages relay agent sessions and session metadata.
-- relay.agents.start uses the current caller session context automatically when this server is mounted for a relay session. External callers can pass locator.channel_type plus locator.address instead.
+- relay.agents.start requires explicit locator.channel_type plus locator.address and enforces caller session authorization for mutating tools.
 - relay config editing is not exposed through MCP; edit the relay config file directly.`
 	if workspaceEnabled {
 		instructions += "\n- relay.workspace is available and should be used for workspace import/export instead of manual branch landing."

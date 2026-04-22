@@ -264,6 +264,85 @@ func TestStopSession_UsesNonCanceledCleanupContext(t *testing.T) {
 	}
 }
 
+func TestHasSession(t *testing.T) {
+	t.Run("active session in memory", func(t *testing.T) {
+		locator := NewTelegramSessionLocator(10, 42)
+		m := &Manager{
+			logger: zerolog.Nop(),
+			sessions: map[string]*TopicSession{
+				locator.SessionID: {
+					sessionID: locator.SessionID,
+					locator:   locator,
+				},
+			},
+		}
+
+		ok, err := m.HasSession(context.Background(), locator)
+		if err != nil {
+			t.Fatalf("HasSession() error = %v", err)
+		}
+		if !ok {
+			t.Fatal("HasSession() = false, want true for active session")
+		}
+	})
+
+	t.Run("active persisted session", func(t *testing.T) {
+		locator := NewTelegramSessionLocator(11, 77)
+		store := &fakeSessionStore{
+			recordsByAddress: map[string]relaystate.SessionRecord{
+				sessionAddressKey(relaystate.ChannelTypeTelegram, "11:77"): {
+					SessionID:   locator.SessionID,
+					ChannelType: relaystate.ChannelTypeTelegram,
+					AddressKey:  "11:77",
+					AddressJSON: `{"chat_id":11,"topic_id":77}`,
+					Status:      relaystate.SessionStatusActive,
+				},
+			},
+		}
+		m := &Manager{
+			logger:       zerolog.Nop(),
+			sessionStore: store,
+			sessions:     map[string]*TopicSession{},
+		}
+
+		ok, err := m.HasSession(context.Background(), locator)
+		if err != nil {
+			t.Fatalf("HasSession() error = %v", err)
+		}
+		if !ok {
+			t.Fatal("HasSession() = false, want true for persisted active session")
+		}
+	})
+
+	t.Run("inactive persisted session", func(t *testing.T) {
+		locator := NewTelegramSessionLocator(12, 88)
+		store := &fakeSessionStore{
+			recordsByAddress: map[string]relaystate.SessionRecord{
+				sessionAddressKey(relaystate.ChannelTypeTelegram, "12:88"): {
+					SessionID:   locator.SessionID,
+					ChannelType: relaystate.ChannelTypeTelegram,
+					AddressKey:  "12:88",
+					AddressJSON: `{"chat_id":12,"topic_id":88}`,
+					Status:      "closed",
+				},
+			},
+		}
+		m := &Manager{
+			logger:       zerolog.Nop(),
+			sessionStore: store,
+			sessions:     map[string]*TopicSession{},
+		}
+
+		ok, err := m.HasSession(context.Background(), locator)
+		if err != nil {
+			t.Fatalf("HasSession() error = %v", err)
+		}
+		if ok {
+			t.Fatal("HasSession() = true, want false for non-active persisted session")
+		}
+	})
+}
+
 func TestExtraMCPServerIDs_ForAllSessions(t *testing.T) {
 	m := &Manager{relayMCPServerIDs: []string{"srv.one", "srv.two"}}
 
@@ -290,52 +369,12 @@ func TestMergeUniqueStringIDs(t *testing.T) {
 	}
 }
 
-func TestEnsureSessionRelayMCPServer_BindsCallerSessionHeader(t *testing.T) {
-	reg := mcpregistry.New(map[string]agentconfig.MCPServerConfig{
-		"relay": {
-			Type: agentconfig.MCPServerTypeHTTP,
-			URL:  "http://127.0.0.1:9999/mcp",
-		},
-	})
-	m := &Manager{mcpRegistry: reg}
-
-	id, cleanup, err := m.ensureSessionRelayMCPServer("tg-1-2")
-	if err != nil {
-		t.Fatalf("ensureSessionRelayMCPServer() error = %v", err)
-	}
-	defer cleanup()
-
-	cfg, ok := reg.Get(id)
-	if !ok {
-		t.Fatalf("registry missing dynamic relay MCP server %q", id)
-	}
-	if got := cfg.Headers["X-Norma-Relay-Caller-Session-ID"]; got != "tg-1-2" {
-		t.Fatalf("caller session header = %q, want tg-1-2", got)
-	}
-}
-
-func TestCloseTopicSession_RemovesDynamicRelayMCPServer(t *testing.T) {
-	reg := mcpregistry.New(map[string]agentconfig.MCPServerConfig{
-		relaySessionMCPServerID("tg-1-2"): {
-			Type: agentconfig.MCPServerTypeHTTP,
-			URL:  "http://127.0.0.1:9999/mcp",
-		},
-	})
-	m := &Manager{mcpRegistry: reg}
-
-	if err := m.closeTopicSession(context.Background(), &TopicSession{relayMCPID: relaySessionMCPServerID("tg-1-2")}); err != nil {
-		t.Fatalf("closeTopicSession() error = %v", err)
-	}
-	if _, ok := reg.Get(relaySessionMCPServerID("tg-1-2")); ok {
-		t.Fatal("dynamic relay MCP server still present after closeTopicSession")
-	}
-}
-
 func TestGetSessionInfo_ReturnsPersistedSession(t *testing.T) {
 	store := &fakeSessionStore{
 		recordsByID: map[string]relaystate.SessionRecord{
 			"tg-10-42": {
 				SessionID:    "tg-10-42",
+				UserID:       "tg-201",
 				ChannelType:  relaystate.ChannelTypeTelegram,
 				AddressKey:   "10:42",
 				AddressJSON:  `{"chat_id":10,"topic_id":42}`,
@@ -359,6 +398,9 @@ func TestGetSessionInfo_ReturnsPersistedSession(t *testing.T) {
 	}
 	if info.SessionID != "tg-10-42" || info.ChatID != 10 || info.TopicID != 42 {
 		t.Fatalf("GetSessionInfo() = %+v, want session/chat/topic tg-10-42/10/42", info)
+	}
+	if info.UserID != "tg-201" {
+		t.Fatalf("GetSessionInfo() user_id = %q, want tg-201", info.UserID)
 	}
 	if info.Status != sessionStatusPersisted {
 		t.Fatalf("GetSessionInfo() status = %q, want %q", info.Status, sessionStatusPersisted)
@@ -498,6 +540,8 @@ func TestStopSessionByID_PersistedSessionCleansWorkspace(t *testing.T) {
 type fakeSessionStore struct {
 	deletedSessionID string
 	deleteCtxErr     error
+	getByAddressErr  error
+	recordsByAddress map[string]relaystate.SessionRecord
 	recordsByID      map[string]relaystate.SessionRecord
 	listRecords      []relaystate.SessionRecord
 }
@@ -506,8 +550,19 @@ func (f *fakeSessionStore) Upsert(context.Context, relaystate.SessionRecord) err
 	return nil
 }
 
-func (f *fakeSessionStore) GetByAddress(context.Context, string, string) (relaystate.SessionRecord, bool, error) {
-	return relaystate.SessionRecord{}, false, nil
+func sessionAddressKey(channelType, addressKey string) string {
+	return channelType + "|" + addressKey
+}
+
+func (f *fakeSessionStore) GetByAddress(_ context.Context, channelType, addressKey string) (relaystate.SessionRecord, bool, error) {
+	if f.getByAddressErr != nil {
+		return relaystate.SessionRecord{}, false, f.getByAddressErr
+	}
+	if f.recordsByAddress == nil {
+		return relaystate.SessionRecord{}, false, nil
+	}
+	record, ok := f.recordsByAddress[sessionAddressKey(channelType, addressKey)]
+	return record, ok, nil
 }
 
 func (f *fakeSessionStore) GetBySessionID(_ context.Context, sessionID string) (relaystate.SessionRecord, bool, error) {

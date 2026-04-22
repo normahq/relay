@@ -267,6 +267,11 @@ func (a *Adapter) topicIDFromMessage(msg *client.Message) int {
 	if msg == nil || msg.MessageThreadId == nil {
 		return 0
 	}
+	if msg.Chat.Type != chatTypePrivate {
+		// In public chats, message_thread_id is the routing key for relay task
+		// threads even when is_topic_message is omitted or false.
+		return *msg.MessageThreadId
+	}
 	if !isTopicMessage(msg) {
 		a.logger.Debug().
 			Str("chat_type", msg.Chat.Type).

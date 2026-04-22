@@ -83,6 +83,7 @@ func TestStartAgentIncludesDescriptionAndMCPServers(t *testing.T) {
 			ChannelType: "telegram",
 			AddressKey:  "1:2",
 			SessionID:   "tg-1-2",
+			UserID:      "tg-1",
 			AgentName:   "opencode",
 			ChatID:      1,
 			TopicID:     2,
@@ -99,6 +100,12 @@ func TestStartAgentIncludesDescriptionAndMCPServers(t *testing.T) {
 	req := &mcp.CallToolRequest{Extra: &mcp.RequestExtra{Header: headers}}
 	result, out, err := s.startAgent(context.Background(), req, startAgentInput{
 		AgentName: "opencode",
+		Locator: &StartLocator{
+			ChannelType: "telegram",
+			Address: map[string]any{
+				"chat_id": float64(1),
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("startAgent() error = %v", err)
@@ -123,7 +130,7 @@ func TestStartAgentIncludesDescriptionAndMCPServers(t *testing.T) {
 	}
 }
 
-func TestStartAgentRequiresLocatorOrCallerContext(t *testing.T) {
+func TestStartAgentRequiresLocatorAndCallerContext(t *testing.T) {
 	s := &service{
 		svc: &fakeRelayService{},
 	}
@@ -155,7 +162,10 @@ func TestStartAgentAcceptsExplicitLocator(t *testing.T) {
 	}
 	s := &service{svc: svc}
 
-	result, out, err := s.startAgent(context.Background(), nil, startAgentInput{
+	headers := http.Header{}
+	headers.Set(CallerSessionIDHeader, "tg-1-0")
+	req := &mcp.CallToolRequest{Extra: &mcp.RequestExtra{Header: headers}}
+	result, out, err := s.startAgent(context.Background(), req, startAgentInput{
 		AgentName: "alpha",
 		Locator: &StartLocator{
 			ChannelType: "telegram",
@@ -172,6 +182,26 @@ func TestStartAgentAcceptsExplicitLocator(t *testing.T) {
 	}
 	if !out.OK || out.ChatID != 1 || out.TopicID != 7 {
 		t.Fatalf("startAgent() output = %#v, want started agent info", out)
+	}
+}
+
+func TestMutatingToolsRequireCallerSessionIdentity(t *testing.T) {
+	s := &service{svc: &fakeRelayService{}}
+
+	stopResult, _, stopErr := s.stopAgent(context.Background(), nil, stopAgentInput{SessionID: "tg-1-1"})
+	if stopErr != nil {
+		t.Fatalf("stopAgent() error = %v", stopErr)
+	}
+	if stopResult == nil || !stopResult.IsError {
+		t.Fatalf("stopAgent() result = %#v, want permission error", stopResult)
+	}
+
+	restartResult, _, restartErr := s.restartAgent(context.Background(), nil, restartAgentInput{SessionID: "tg-1-1"})
+	if restartErr != nil {
+		t.Fatalf("restartAgent() error = %v", restartErr)
+	}
+	if restartResult == nil || !restartResult.IsError {
+		t.Fatalf("restartAgent() result = %#v, want permission error", restartResult)
 	}
 }
 
@@ -302,6 +332,7 @@ type fakeRelayService struct {
 	startInfo   AgentInfo
 	startErr    error
 	startReq    StartRequest
+	stopReq     StopRequest
 	stopErr     error
 	getErr      error
 	sessionInfo AgentInfo
@@ -316,7 +347,8 @@ func (f *fakeRelayService) StartAgent(_ context.Context, req StartRequest) (Agen
 	return f.startInfo, nil
 }
 
-func (f *fakeRelayService) StopAgent(_ context.Context, _ string) error {
+func (f *fakeRelayService) StopAgent(_ context.Context, req StopRequest) error {
+	f.stopReq = req
 	return f.stopErr
 }
 

@@ -32,8 +32,8 @@ const (
 const serverInstructions = `Use this server to manage relay agent sessions.
 
 - relay.agents.start creates a new relay session for a configured agent.
-- When this server is mounted for an existing relay session, start uses the current caller session context automatically.
-- External callers can provide locator.channel_type plus locator.address to target a specific channel context.
+- relay.agents.start requires explicit locator.channel_type and locator.address target context.
+- Mutating tools require caller session identity and enforce session-scoped authorization.
 - relay.agents.list returns both active sessions and persisted restorable sessions.
 - relay.agents.get and relay.agents.stop operate on a relay session_id.
 - Backward-compatible aliases remain available: relay.agents.list_agents, relay.agents.get_agent, relay.agents.stop_agent.`
@@ -77,7 +77,7 @@ func failure(operation string, code string, message string) (*mcp.CallToolResult
 
 type RelayService interface {
 	StartAgent(ctx context.Context, req StartRequest) (AgentInfo, error)
-	StopAgent(ctx context.Context, sessionID string) error
+	StopAgent(ctx context.Context, req StopRequest) error
 	ListAgents(ctx context.Context) ([]AgentInfo, error)
 	GetSession(ctx context.Context, sessionID string) (AgentInfo, error)
 }
@@ -93,10 +93,16 @@ type StartRequest struct {
 	Locator         *StartLocator `json:"locator,omitempty"`
 }
 
+type StopRequest struct {
+	SessionID       string `json:"session_id"`
+	CallerSessionID string `json:"caller_session_id,omitempty"`
+}
+
 type AgentInfo struct {
 	ChannelType string   `json:"channel_type,omitempty" jsonschema:"channel type that owns the session, for example telegram"`
 	AddressKey  string   `json:"address_key,omitempty" jsonschema:"channel-specific address key used internally to identify the session context"`
 	SessionID   string   `json:"session_id,omitempty" jsonschema:"relay session ID"`
+	UserID      string   `json:"-"`
 	AgentName   string   `json:"agent_name,omitempty" jsonschema:"configured agent name running in the session"`
 	ChatID      int64    `json:"chat_id,omitempty" jsonschema:"Telegram chat ID when the session belongs to Telegram; omitted for other channels"`
 	TopicID     int      `json:"topic_id,omitempty" jsonschema:"Telegram topic ID when the session belongs to a forum topic; root sessions use 0"`
@@ -205,7 +211,7 @@ type service struct {
 func (s *service) registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        toolAgentsStart,
-		Description: "Start a new relay agent session for a configured agent. The server uses the current caller session context automatically when available; external callers can provide locator.channel_type and locator.address instead.",
+		Description: "Start a new relay agent session for a configured agent. Requires explicit locator.channel_type and locator.address target context.",
 	}, s.startAgent)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        toolAgentsStop,
@@ -239,7 +245,7 @@ func (s *service) registerTools(server *mcp.Server) {
 
 type startAgentInput struct {
 	AgentName string        `json:"agent_name" jsonschema:"configured agent name to start"`
-	Locator   *StartLocator `json:"locator,omitempty" jsonschema:"optional explicit channel locator for external callers; omit it when this relay MCP server is already bound to a caller session"`
+	Locator   *StartLocator `json:"locator,omitempty" jsonschema:"required explicit channel locator for the new session target"`
 }
 
 type startAgentOutput struct {
@@ -278,14 +284,19 @@ func (s *service) startAgent(ctx context.Context, req *mcp.CallToolRequest, in s
 		result, out := validationFailure(operation, "agent_name is required")
 		return result, startAgentOutput{ToolOutcome: out}, nil
 	}
-	if in.Locator == nil && callerSessionID(req) == "" {
-		result, out := validationFailure(operation, "locator is required unless this relay MCP server is already bound to a caller session")
+	if in.Locator == nil {
+		result, out := validationFailure(operation, "locator is required")
+		return result, startAgentOutput{ToolOutcome: out}, nil
+	}
+	caller := callerSessionID(req)
+	if caller == "" {
+		result, out := failure(operation, "permission_denied", "caller session identity is required")
 		return result, startAgentOutput{ToolOutcome: out}, nil
 	}
 
 	info, err := s.svc.StartAgent(ctx, StartRequest{
 		AgentName:       in.AgentName,
-		CallerSessionID: callerSessionID(req),
+		CallerSessionID: caller,
 		Locator:         in.Locator,
 	})
 	if err != nil {
@@ -316,8 +327,16 @@ func (s *service) stopAgent(ctx context.Context, req *mcp.CallToolRequest, in st
 		result, out := validationFailure(operation, "session_id is required")
 		return result, out, nil
 	}
+	caller := callerSessionID(req)
+	if caller == "" {
+		result, out := failure(operation, "permission_denied", "caller session identity is required")
+		return result, out, nil
+	}
 
-	if err := s.svc.StopAgent(ctx, in.SessionID); err != nil {
+	if err := s.svc.StopAgent(ctx, StopRequest{
+		SessionID:       in.SessionID,
+		CallerSessionID: caller,
+	}); err != nil {
 		result, out := backendFailure(operation, err)
 		return result, out, nil
 	}
@@ -347,6 +366,11 @@ func (s *service) restartAgent(ctx context.Context, req *mcp.CallToolRequest, in
 		result, out := validationFailure(operation, "session_id is required")
 		return result, restartAgentOutput{ToolOutcome: out}, nil
 	}
+	caller := callerSessionID(req)
+	if caller == "" {
+		result, out := failure(operation, "permission_denied", "caller session identity is required")
+		return result, restartAgentOutput{ToolOutcome: out}, nil
+	}
 
 	info, err := s.svc.GetSession(ctx, in.SessionID)
 	if err != nil {
@@ -354,13 +378,17 @@ func (s *service) restartAgent(ctx context.Context, req *mcp.CallToolRequest, in
 		return result, restartAgentOutput{ToolOutcome: out}, nil
 	}
 
-	if err := s.svc.StopAgent(ctx, in.SessionID); err != nil {
+	if err := s.svc.StopAgent(ctx, StopRequest{
+		SessionID:       in.SessionID,
+		CallerSessionID: caller,
+	}); err != nil {
 		result, out := backendFailure(operation, fmt.Errorf("failed to stop session: %w", err))
 		return result, restartAgentOutput{ToolOutcome: out}, nil
 	}
 
 	startReq := StartRequest{
-		AgentName: info.AgentName,
+		AgentName:       info.AgentName,
+		CallerSessionID: caller,
 		Locator: &StartLocator{
 			ChannelType: info.ChannelType,
 			Address:     map[string]any{"chat_id": info.ChatID},

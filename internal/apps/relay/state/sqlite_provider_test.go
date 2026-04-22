@@ -55,6 +55,7 @@ func TestSQLiteProvider_SessionStoreRoundTrip(t *testing.T) {
 
 	record := SessionRecord{
 		SessionID:    "tg-1-2",
+		UserID:       "tg-101",
 		ChannelType:  ChannelTypeTelegram,
 		AddressKey:   "1:2",
 		AddressJSON:  `{"chat_id":1,"topic_id":2}`,
@@ -79,6 +80,9 @@ func TestSQLiteProvider_SessionStoreRoundTrip(t *testing.T) {
 	}
 	if got.AgentName != record.AgentName {
 		t.Fatalf("agent_name = %q, want %q", got.AgentName, record.AgentName)
+	}
+	if got.UserID != record.UserID {
+		t.Fatalf("user_id = %q, want %q", got.UserID, record.UserID)
 	}
 }
 
@@ -130,8 +134,8 @@ func TestSQLiteProvider_WritesSchemaMigrationVersion(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("query schema_migrations version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("schema_migrations version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("schema_migrations version = %d, want 6", version)
 	}
 }
 
@@ -172,6 +176,9 @@ func TestSQLiteProvider_AdoptsExistingLegacySchema(t *testing.T) {
 	if record.AddressJSON != `{"chat_id":1,"topic_id":2}` {
 		t.Fatalf("address_json after migration = %q, want telegram address json", record.AddressJSON)
 	}
+	if record.UserID != "" {
+		t.Fatalf("user_id after migration = %q, want empty for legacy rows", record.UserID)
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -183,8 +190,8 @@ func TestSQLiteProvider_AdoptsExistingLegacySchema(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("query schema_migrations version: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("schema_migrations version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("schema_migrations version = %d, want 6", version)
 	}
 }
 

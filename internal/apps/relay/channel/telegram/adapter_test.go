@@ -70,6 +70,34 @@ func TestMessageContextFromEvent_SupergroupPreservesMessageThreadID(t *testing.T
 	}
 }
 
+func TestMessageContextFromEvent_SupergroupPreservesMessageThreadIDWhenNonTopicFlagFalse(t *testing.T) {
+	topicID := 88
+	isTopicMessage := false
+
+	got, ok := (&Adapter{}).MessageContextFromEvent(&events.MessageEvent{
+		Message: &client.Message{
+			MessageId:       22,
+			MessageThreadId: &topicID,
+			IsTopicMessage:  &isTopicMessage,
+			Chat: client.Chat{
+				Id:   -1009001,
+				Type: "supergroup",
+			},
+			From: &client.User{Id: 101},
+			Text: textPtr(testMessageText),
+		},
+	})
+	if !ok {
+		t.Fatal("MessageContextFromEvent() ok = false, want true")
+	}
+	if got.TopicID != 88 {
+		t.Fatalf("topic_id = %d, want 88 for supergroup thread", got.TopicID)
+	}
+	if got.Locator.SessionID != "tg--1009001-88" {
+		t.Fatalf("session_id = %q, want tg--1009001-88", got.Locator.SessionID)
+	}
+}
+
 func TestMessageContextFromEvent_PrivateTopicPreservesMessageThreadID(t *testing.T) {
 	topicID := 523431
 	isTopicMessage := true

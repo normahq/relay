@@ -17,7 +17,6 @@ import (
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
 	"github.com/normahq/relay/internal/apps/relay/runtimecfg"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
-	"github.com/normahq/relay/internal/apps/relaymcp"
 	"github.com/normahq/relay/internal/git"
 	"github.com/rs/zerolog"
 	"go.uber.org/fx"
@@ -191,62 +190,6 @@ func (m *Manager) extraMCPServerIDs() []string {
 	return append([]string(nil), m.relayMCPServerIDs...)
 }
 
-func relaySessionMCPServerID(sessionID string) string {
-	return "relay.session." + strings.TrimSpace(sessionID)
-}
-
-func (m *Manager) sessionMCPServerIDs(sessionID string) ([]string, func(), error) {
-	relayID, cleanup, err := m.ensureSessionRelayMCPServer(sessionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return mergeUniqueStringIDs([]string{relayID}, m.extraMCPServerIDs()), cleanup, nil
-}
-
-func (m *Manager) ensureSessionRelayMCPServer(sessionID string) (string, func(), error) {
-	if m.mcpRegistry == nil {
-		return "relay", func() {}, nil
-	}
-
-	baseCfg, ok := m.mcpRegistry.Get("relay")
-	if !ok {
-		return "", nil, fmt.Errorf("built-in relay MCP server is not registered")
-	}
-
-	headers := cloneStringMap(baseCfg.Headers)
-	if headers == nil {
-		headers = make(map[string]string, 1)
-	}
-	headers[relaymcp.CallerSessionIDHeader] = strings.TrimSpace(sessionID)
-
-	cfg := agentconfig.MCPServerConfig{
-		Type:       baseCfg.Type,
-		Cmd:        append([]string(nil), baseCfg.Cmd...),
-		Args:       append([]string(nil), baseCfg.Args...),
-		Env:        cloneStringMap(baseCfg.Env),
-		WorkingDir: baseCfg.WorkingDir,
-		URL:        baseCfg.URL,
-		Headers:    headers,
-	}
-
-	id := relaySessionMCPServerID(sessionID)
-	m.mcpRegistry.Set(id, cfg)
-	return id, func() {
-		m.mcpRegistry.Delete(id)
-	}, nil
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
 // ApplyRuntimeConfig updates manager runtime configuration used for creating new sessions.
 func (m *Manager) ApplyRuntimeConfig(normaCfg runtimeconfig.RuntimeConfig, relayCfg runtimecfg.RelayConfig) error {
 	builder, err := m.rebuildAgentBuilder(normaCfg, relayCfg)
@@ -379,14 +322,7 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		m.logger.Debug().Str("session_id", sessionID).Str("workspace", workspaceDir).Msg("workspace created")
 	}
 
-	mcpServerIDs, cleanupRelayMCP, err := m.sessionMCPServerIDs(sessionID)
-	if err != nil {
-		if m.workspaceEnabled {
-			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
-		}
-		return fmt.Errorf("prepare session MCP servers: %w", err)
-	}
-
+	extraMCPServerIDs := m.extraMCPServerIDs()
 	built, err := builder.BuildWithMCPServerIDs(
 		m.rootCtx,
 		sessionID,
@@ -395,12 +331,11 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		topicID,
 		agentName,
 		workspaceDir,
-		mcpServerIDs,
 		nil,
+		extraMCPServerIDs,
 	)
 	if err != nil {
 		m.logger.Error().Err(err).Str("session_id", sessionID).Str("agent", agentName).Msg("failed to build agent")
-		cleanupRelayMCP()
 		if m.workspaceEnabled {
 			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
 		}
@@ -420,14 +355,12 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		chatID:       chatID,
 		workspaceDir: workspaceDir,
 		branchName:   branchName,
-		relayMCPID:   relaySessionMCPServerID(sessionID),
 	}
 
 	if err := m.persistSessionRecord(ctx, ts, relaystate.SessionStatusActive); err != nil {
 		if closer, ok := ts.agent.(io.Closer); ok {
 			_ = closer.Close()
 		}
-		cleanupRelayMCP()
 		if m.workspaceEnabled && workspaceDir != "" {
 			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
 		}
@@ -469,6 +402,39 @@ func (m *Manager) GetSession(locator SessionLocator) (*TopicSession, error) {
 	}
 
 	return ts, nil
+}
+
+// HasSession reports whether a session exists in memory or persisted metadata.
+// It does not create or restore sessions.
+func (m *Manager) HasSession(ctx context.Context, locator SessionLocator) (bool, error) {
+	sessionID := strings.TrimSpace(locator.SessionID)
+	if sessionID == "" {
+		return false, nil
+	}
+
+	m.mu.RLock()
+	_, active := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if active {
+		return true, nil
+	}
+
+	if m.sessionStore == nil {
+		return false, nil
+	}
+
+	record, ok, err := m.sessionStore.GetByAddress(ctx, locator.ChannelType, locator.AddressKey)
+	if err != nil {
+		return false, fmt.Errorf("read session metadata: %w", err)
+	}
+	if !ok {
+		return false, nil
+	}
+
+	if status := strings.TrimSpace(record.Status); status != "" && status != relaystate.SessionStatusActive {
+		return false, nil
+	}
+	return true, nil
 }
 
 // GetTelegramSession returns the in-memory session for the given Telegram tuple.
@@ -763,6 +729,7 @@ func topicSessionInfoFromRecord(record relaystate.SessionRecord) (TopicSessionIn
 
 	info := TopicSessionInfo{
 		SessionID:    record.SessionID,
+		UserID:       record.UserID,
 		Locator:      locator,
 		ChannelType:  locator.ChannelType,
 		AgentName:    record.AgentName,
@@ -839,9 +806,6 @@ func (m *Manager) closeTopicSession(ctx context.Context, ts *TopicSession) error
 			firstErr = err
 		}
 	}
-	if m.mcpRegistry != nil && strings.TrimSpace(ts.relayMCPID) != "" {
-		m.mcpRegistry.Delete(ts.relayMCPID)
-	}
 	return firstErr
 }
 
@@ -895,6 +859,7 @@ func (m *Manager) persistSessionRecord(ctx context.Context, ts *TopicSession, st
 
 	return m.sessionStore.Upsert(ctx, relaystate.SessionRecord{
 		SessionID:    ts.sessionID,
+		UserID:       ts.userID,
 		ChannelType:  ts.locator.ChannelType,
 		AddressKey:   ts.locator.AddressKey,
 		AddressJSON:  ts.locator.AddressJSON,
