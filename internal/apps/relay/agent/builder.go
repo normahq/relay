@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/normahq/norma/pkg/runtime/acpagent"
 	"github.com/normahq/norma/pkg/runtime/agentconfig"
 	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
@@ -199,6 +200,11 @@ func (b *Builder) BuildWithMCPServerIDs(
 		AppName:   fmt.Sprintf("norma-relay-topic-%d", topicID),
 		UserID:    strings.TrimSpace(userID),
 		SessionID: sessionID,
+		State: map[string]any{
+			acpagent.SessionStateKey: map[string]any{
+				"cwd": workspaceDir,
+			},
+		},
 	})
 	if err != nil {
 		if closer, ok := ag.(io.Closer); ok {
