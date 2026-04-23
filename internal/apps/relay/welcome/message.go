@@ -30,18 +30,25 @@ func BuildAgentWelcomeMessage(name, sessionID, agentType, model string, mcpServe
 	}
 
 	cleanMCP := normalizeMCPServers(mcpServers)
-	if len(cleanMCP) == 0 {
-		cleanMCP = []string{noneValue}
+	mcpValue := strings.Join(cleanMCP, ", ")
+	if mcpValue == "" {
+		mcpValue = noneValue
 	}
 
 	return fmt.Sprintf(
-		"name=%s session=%s type=%s model=%s mcp=%s",
-		cleanName,
-		cleanSessionID,
-		cleanType,
-		cleanModel,
-		strings.Join(cleanMCP, ","),
+		"🚀 **Session Started** • **Name:** `%s` • **ID:** `%s` • **Model:** `%s` • **Type:** `%s` • **MCP:** `%s` ",
+		escapeMarkdownV2(cleanName),
+		escapeMarkdownV2(cleanSessionID),
+		escapeMarkdownV2(cleanModel),
+		escapeMarkdownV2(cleanType),
+		escapeMarkdownV2(mcpValue),
 	)
+}
+
+func escapeMarkdownV2(s string) string {
+	// Inside code blocks (backticks), only \ and ` need to be escaped.
+	// Since we are using backticks for values, we escape backticks.
+	return strings.ReplaceAll(s, "`", "\\` ")
 }
 
 func normalizeMCPServers(mcpServers []string) []string {

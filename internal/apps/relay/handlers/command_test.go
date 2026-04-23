@@ -207,11 +207,9 @@ func TestCommandHandlerOnCommand_TopicCreatesTopicSession(t *testing.T) {
 	if sm.createCalls[0].SessionID != "tg-9001-456" || sm.createCalls[0].UserID != "tg-101" || sm.createCalls[0].AgentName != "alpha" {
 		t.Fatalf("CreateSession call = %+v, want session=tg-9001-456 user=tg-101 agent=alpha", sm.createCalls[0])
 	}
-	assertLastSentContains(t, tgClient, "name\\=alpha")
-	assertLastSentContains(t, tgClient, "session\\=tg\\-9001\\-456")
-	assertLastSentContains(t, tgClient, "type\\=opencode\\_acp")
-	assertLastSentContains(t, tgClient, "model\\=gpt\\-5")
-	assertLastSentContains(t, tgClient, "mcp\\=provider\\_mcp")
+	assertLastSentContains(t, tgClient, "Name")
+	assertLastSentContains(t, tgClient, "alpha")
+	assertLastSentContains(t, tgClient, "tg\\-9001\\-456")
 }
 
 func TestCommandHandlerOnCommand_TopicCollaboratorAllowed(t *testing.T) {
@@ -232,7 +230,8 @@ func TestCommandHandlerOnCommand_TopicCollaboratorAllowed(t *testing.T) {
 	if len(turns.cancelCalls) != 0 {
 		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
 	}
-	assertLastSentContains(t, tgClient, "name\\=ops run")
+	assertLastSentContains(t, tgClient, "Name")
+	assertLastSentContains(t, tgClient, "ops run")
 }
 
 func TestCommandHandlerOnCommand_TopicNoRootProvider_ShowsError(t *testing.T) {

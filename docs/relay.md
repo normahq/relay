@@ -216,8 +216,9 @@ Relay runs with a single provider per process (`relay.provider`).
 - Relay restores persisted topic metadata on first message after restart.
 - Persisted session label is reused as-is for restore; if missing, relay falls back to label `auto`.
 - If no persisted topic metadata exists, relay creates a new topic session using label `auto`.
-- Welcome message uses compact KV format:
-  - `name=<label> session=<session_id> type=<provider_type> model=<model> mcp=<server1,server2>`
+- Welcome message uses a user-friendly MarkdownV2 format:
+  - Example:
+    🚀 **Session Started** • **Name:** `relay` • **ID:** `tg-1-0` • **Model:** `opencode/big-pickle` • **Type:** `opencode_acp` • **MCP:** `relay, workspace`
 
 ## Workspace MCP Usage
 
