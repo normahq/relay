@@ -28,9 +28,25 @@ const sessionStatusPersisted = "persisted"
 
 var ErrNoPersistedSession = errors.New("no persisted session")
 
+type agentBuilder interface {
+	BuildWithMCPServerIDs(
+		ctx context.Context,
+		sessionID string,
+		userID string,
+		chatID int64,
+		topicID int,
+		agentName, workspaceDir string,
+		bundledMCPServerIDs []string,
+		extraMCPServerIDs []string,
+	) (*relayagent.BuiltAgent, error)
+	ValidateAgent(agentName string) error
+	GetAgentInfo(agentName string) (string, []string)
+	ProviderIDs() []string
+}
+
 // Manager manages relay ADK sessions and persists session metadata.
 type Manager struct {
-	agentBuilder      *relayagent.Builder
+	agentBuilder      agentBuilder
 	relayMCPServerIDs []string
 	runtimeMCPIDs     map[string]struct{}
 	rootAgentName     string
@@ -324,19 +340,24 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 	}
 
 	extraMCPServerIDs := m.extraMCPServerIDs()
+	rootProvider := m.getProviderName()
+	if rootProvider == "" {
+		return fmt.Errorf("relay root provider is not configured")
+	}
+
 	built, err := builder.BuildWithMCPServerIDs(
 		m.rootCtx,
 		sessionID,
 		userID,
 		chatID,
 		topicID,
-		agentName,
+		rootProvider,
 		workspaceDir,
 		nil,
 		extraMCPServerIDs,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Str("session_id", sessionID).Str("agent", agentName).Msg("failed to build agent")
+		m.logger.Error().Err(err).Str("session_id", sessionID).Str("agent", rootProvider).Str("label", agentName).Msg("failed to build agent")
 		if m.workspaceEnabled {
 			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
 		}
@@ -501,6 +522,7 @@ func (m *Manager) RestoreSession(ctx context.Context, sessionCtx SessionContext)
 	resolvedAgentName, usedFallback, fallbackReason, err := resolveRestoreAgentName(
 		record.AgentName,
 		m.getProviderName(),
+		sessionCtx.AllowRootProviderFallback,
 		m.ValidateAgent,
 	)
 	if err != nil {
@@ -533,8 +555,9 @@ func (m *Manager) RestoreSession(ctx context.Context, sessionCtx SessionContext)
 // RestoreTelegramSession restores a Telegram session from persisted metadata.
 func (m *Manager) RestoreTelegramSession(ctx context.Context, chatID int64, topicID int, userID int64) (*TopicSession, error) {
 	return m.RestoreSession(ctx, SessionContext{
-		Locator: NewTelegramSessionLocator(chatID, topicID),
-		UserID:  TelegramUserID(userID),
+		Locator:                   NewTelegramSessionLocator(chatID, topicID),
+		UserID:                    TelegramUserID(userID),
+		AllowRootProviderFallback: true,
 	})
 }
 
@@ -756,6 +779,7 @@ func sessionStatusForInactiveRecord(recordStatus string) string {
 func resolveRestoreAgentName(
 	persistedAgentName string,
 	rootAgentName string,
+	allowRootProviderFallback bool,
 	validate func(agentName string) error,
 ) (resolvedAgentName string, usedFallback bool, fallbackReason string, err error) {
 	if validate == nil {
@@ -771,6 +795,9 @@ func resolveRestoreAgentName(
 			return persisted, false, "", nil
 		}
 
+		if !allowRootProviderFallback {
+			return "", false, "", fmt.Errorf("persisted agent %q is unavailable: %w", persisted, persistedErr)
+		}
 		if root == "" {
 			return "", false, "", fmt.Errorf("persisted agent %q is unavailable: %w; relay root provider is not configured", persisted, persistedErr)
 		}
@@ -780,6 +807,9 @@ func resolveRestoreAgentName(
 		return root, true, "persisted_agent_unavailable", nil
 	}
 
+	if !allowRootProviderFallback {
+		return "", false, "", fmt.Errorf("persisted session agent is empty")
+	}
 	if root == "" {
 		return "", false, "", fmt.Errorf("persisted session agent is empty and relay root provider is not configured")
 	}

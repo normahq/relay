@@ -180,8 +180,8 @@ Relay lazy-restores a topic session on first message after restart when metadata
 ## Message Flow
 
 1. User sends Telegram message.
-   - In non-DM chats (groups/supergroups/topics), relay starts a new thread session only when the message starts with `@<bot_username>` or is a reply to this bot's message.
-   - For an already-known thread (`message_thread_id`) with an active or persisted relay session, relay accepts follow-up messages without requiring repeated mentions/replies.
+   - In non-DM chats (groups/supergroups/topics), relay processes a message only when it starts with `@<bot_username>` or is a reply to this bot's message.
+   - In DM chats, relay processes non-command text messages normally.
 2. Relay resolves session by `(chat_id, topic_id)`.
 3. If topic session is missing in memory, relay attempts lazy restore from persisted metadata.
 4. Relay calls ADK runner for that session.
@@ -213,6 +213,7 @@ Both paths create:
 **Note:** `/new` and `/close` commands are only available in direct messages (DM), not group chats.
 
 - `/new [provider_id]` creates a new topic-bound subagent session (DM only), defaulting to `relay.provider` when omitted.
+  - **Backend Note:** Subagent sessions always use the current `relay.provider` for execution. The provided `provider_id` (or agent name) serves as a label for the session but does not select the backend provider.
 - `/close` closes the current topic (when `message_thread_id > 0`) and stops the current agent session (DM only).
 - In the main chat (`topic_id = 0`), `/close` only stops the root session (topic is not closed).
 
@@ -226,6 +227,7 @@ Both paths create:
   - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`
   - caller scope enforcement: start target `chat_id` must match caller session chat
   - output: structured session object including `channel_type`, `address_key`, `session_id`, `chat_id`, `topic_id`, `agent_name`, `description`, `mcp_servers`
+  - **Backend Note:** The `agent_name` serves as a label for the session. Execution always uses the current `relay.provider` configured for the relay instance.
 - `relay.agents.stop`
   - input: `session_id`
   - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`

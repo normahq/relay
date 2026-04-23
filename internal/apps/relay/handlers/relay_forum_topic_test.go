@@ -236,6 +236,34 @@ func TestRelayHandlerOnMessage_ChannelMentionBypassesGate(t *testing.T) {
 	}
 }
 
+func TestRelayHandlerOnMessage_DMNonMentionAllowed(t *testing.T) {
+	handler, turns, locator := newRelayMessageHandlerHarness(t, 0)
+
+	text := "hello from dm"
+	event := &events.MessageEvent{
+		Type: messagetype.Text,
+		Message: &client.Message{
+			Chat: client.Chat{
+				Id:   9001,
+				Type: "private",
+			},
+			Text: &text,
+			From: &client.User{Id: 101},
+		},
+	}
+
+	if err := handler.onMessage(context.Background(), event); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+
+	if len(turns.enqueueCalls) != 1 {
+		t.Fatalf("Enqueue calls = %d, want 1", len(turns.enqueueCalls))
+	}
+	if turns.enqueueCalls[0].SessionID != locator.SessionID {
+		t.Fatalf("Enqueue session = %q, want %q", turns.enqueueCalls[0].SessionID, locator.SessionID)
+	}
+}
+
 func TestRelayHandlerOnMessage_TopicUnknownThreadIgnoresNonMentionNonReply(t *testing.T) {
 	handler, turns, _ := newRelayMessageHandlerHarness(t, 77)
 
@@ -263,8 +291,8 @@ func TestRelayHandlerOnMessage_TopicUnknownThreadIgnoresNonMentionNonReply(t *te
 	}
 }
 
-func TestRelayHandlerOnMessage_TopicKnownThreadAllowsNonMentionNonReply(t *testing.T) {
-	handler, turns, locator := newRelayMessageHandlerHarness(t, 77)
+func TestRelayHandlerOnMessage_TopicKnownThreadStillRequiresMentionOrReply(t *testing.T) {
+	handler, turns, _ := newRelayMessageHandlerHarness(t, 77)
 
 	text := "hello from the topic"
 	topicID := 77
@@ -285,11 +313,8 @@ func TestRelayHandlerOnMessage_TopicKnownThreadAllowsNonMentionNonReply(t *testi
 		t.Fatalf("onMessage() error = %v", err)
 	}
 
-	if len(turns.enqueueCalls) != 1 {
-		t.Fatalf("Enqueue calls = %d, want 1", len(turns.enqueueCalls))
-	}
-	if turns.enqueueCalls[0].SessionID != locator.SessionID {
-		t.Fatalf("Enqueue session = %q, want %q", turns.enqueueCalls[0].SessionID, locator.SessionID)
+	if len(turns.enqueueCalls) != 0 {
+		t.Fatalf("Enqueue calls = %d, want 0", len(turns.enqueueCalls))
 	}
 }
 

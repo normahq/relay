@@ -5,8 +5,9 @@ import "fmt"
 // SessionContext carries the channel locator plus the transport actor identity
 // used to bind the underlying ADK session.
 type SessionContext struct {
-	Locator SessionLocator
-	UserID  string
+	Locator                   SessionLocator
+	UserID                    string
+	AllowRootProviderFallback bool
 }
 
 // TelegramUserID returns the canonical Telegram-backed ADK user ID.

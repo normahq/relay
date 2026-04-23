@@ -92,6 +92,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		got, fallback, reason, err := resolveRestoreAgentName(
 			"task-agent",
 			rootAgent,
+			true,
 			func(agentName string) error {
 				if agentName == "task-agent" {
 					return nil
@@ -111,6 +112,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		got, fallback, reason, err := resolveRestoreAgentName(
 			"old-agent",
 			rootAgent,
+			true,
 			func(agentName string) error {
 				if agentName == rootAgent {
 					return nil
@@ -121,7 +123,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveRestoreAgentName() error = %v", err)
 		}
-		if got != "root-provider" || !fallback || reason != "persisted_agent_unavailable" {
+		if got != rootAgent || !fallback || reason != "persisted_agent_unavailable" {
 			t.Fatalf("resolveRestoreAgentName() = (%q,%t,%q), want (%q,%t,%q)", got, fallback, reason, rootAgent, true, "persisted_agent_unavailable")
 		}
 	})
@@ -130,6 +132,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		got, fallback, reason, err := resolveRestoreAgentName(
 			"   ",
 			rootAgent,
+			true,
 			func(agentName string) error {
 				if agentName == rootAgent {
 					return nil
@@ -140,7 +143,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveRestoreAgentName() error = %v", err)
 		}
-		if got != "root-provider" || !fallback || reason != "persisted_agent_missing" {
+		if got != rootAgent || !fallback || reason != "persisted_agent_missing" {
 			t.Fatalf("resolveRestoreAgentName() = (%q,%t,%q), want (%q,%t,%q)", got, fallback, reason, rootAgent, true, "persisted_agent_missing")
 		}
 	})
@@ -149,6 +152,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		_, _, _, err := resolveRestoreAgentName(
 			"old-agent",
 			rootAgent,
+			true,
 			func(agentName string) error { return fmt.Errorf("agent %q not found", agentName) },
 		)
 		if err == nil {
@@ -157,7 +161,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		if !strings.Contains(err.Error(), `persisted agent "old-agent" is unavailable`) {
 			t.Fatalf("resolveRestoreAgentName() error = %q, want persisted-unavailable context", err.Error())
 		}
-		if !strings.Contains(err.Error(), `relay root provider "root-provider" is unavailable`) {
+		if !strings.Contains(err.Error(), fmt.Sprintf("relay root provider %q is unavailable", rootAgent)) {
 			t.Fatalf("resolveRestoreAgentName() error = %q, want root-unavailable context", err.Error())
 		}
 	})
@@ -166,6 +170,7 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		_, _, _, err := resolveRestoreAgentName(
 			"old-agent",
 			"",
+			true,
 			func(agentName string) error { return fmt.Errorf("agent %q not found", agentName) },
 		)
 		if err == nil {
@@ -180,23 +185,41 @@ func TestResolveRestoreAgentName(t *testing.T) {
 		_, _, _, err := resolveRestoreAgentName(
 			"",
 			rootAgent,
+			true,
 			func(agentName string) error { return fmt.Errorf("agent %q not found", agentName) },
 		)
 		if err == nil {
 			t.Fatal("resolveRestoreAgentName() error = nil, want unavailable root provider error")
 		}
-		if !strings.Contains(err.Error(), `relay root provider "root-provider" is unavailable`) {
+		if !strings.Contains(err.Error(), fmt.Sprintf("relay root provider %q is unavailable", rootAgent)) {
 			t.Fatalf("resolveRestoreAgentName() error = %q, want root-unavailable message", err.Error())
 		}
 	})
 
 	t.Run("fails when validator is missing", func(t *testing.T) {
-		_, _, _, err := resolveRestoreAgentName("old-agent", rootAgent, nil)
+		_, _, _, err := resolveRestoreAgentName("old-agent", rootAgent, true, nil)
 		if err == nil {
 			t.Fatal("resolveRestoreAgentName() error = nil, want validator-required error")
 		}
 		if !strings.Contains(err.Error(), "agent validator is required") {
 			t.Fatalf("resolveRestoreAgentName() error = %q, want validator-required message", err.Error())
+		}
+	})
+	t.Run("does not fall back to root when disabled", func(t *testing.T) {
+		_, fallback, reason, err := resolveRestoreAgentName(
+			"old-agent",
+			rootAgent,
+			false,
+			func(agentName string) error { return fmt.Errorf("agent %q not found", agentName) },
+		)
+		if err == nil {
+			t.Fatal("resolveRestoreAgentName() error = nil, want no-fallback error")
+		}
+		if fallback || reason != "" {
+			t.Fatalf("resolveRestoreAgentName() = (%t,%q), want (false,\"\")", fallback, reason)
+		}
+		if !strings.Contains(err.Error(), `persisted agent "old-agent" is unavailable`) {
+			t.Fatalf("resolveRestoreAgentName() error = %q, want persisted-agent error", err.Error())
 		}
 	})
 }
@@ -534,6 +557,107 @@ func TestStopSessionByID_PersistedSessionCleansWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(workspaceDir); !os.IsNotExist(err) {
 		t.Fatalf("workspace still exists after StopSessionByID; stat err = %v", err)
+	}
+}
+
+type fakeAgentBuilder struct {
+	lastBuiltAgentName string
+}
+
+func (f *fakeAgentBuilder) BuildWithMCPServerIDs(
+	_ context.Context,
+	_, _ string,
+	_ int64,
+	_ int,
+	agentName, _ string,
+	_, _ []string,
+) (*relayagent.BuiltAgent, error) {
+	f.lastBuiltAgentName = agentName
+	return &relayagent.BuiltAgent{}, nil
+}
+
+func (f *fakeAgentBuilder) ValidateAgent(agentName string) error {
+	return nil
+}
+
+func (f *fakeAgentBuilder) ProviderIDs() []string {
+	return nil
+}
+
+func (f *fakeAgentBuilder) GetAgentInfo(agentName string) (string, []string) {
+	return "", nil
+}
+
+func TestCreateSession_UsesRootProviderBackend(t *testing.T) {
+	builder := &fakeAgentBuilder{}
+	m := &Manager{
+		rootAgentName: "root-provider",
+		agentBuilder:  builder,
+		logger:        zerolog.Nop(),
+		sessions:      make(map[string]*TopicSession),
+		sessionStore:  &fakeSessionStore{},
+	}
+
+	err := m.CreateSession(context.Background(), SessionContext{
+		Locator: NewTelegramSessionLocator(10, 42),
+		UserID:  "tg-201",
+	}, "custom-label")
+
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	if builder.lastBuiltAgentName != "root-provider" {
+		t.Fatalf("built with agent %q, want %q", builder.lastBuiltAgentName, "root-provider")
+	}
+
+	ts := m.sessions[NewTelegramSessionLocator(10, 42).SessionID]
+	if ts.agentName != "custom-label" {
+		t.Fatalf("session label = %q, want %q", ts.agentName, "custom-label")
+	}
+}
+
+func TestRestoreSession_AlwaysUsesCurrentRootProviderBackend(t *testing.T) {
+	builder := &fakeAgentBuilder{}
+	locator := NewTelegramSessionLocator(10, 42)
+	store := &fakeSessionStore{
+		recordsByAddress: map[string]relaystate.SessionRecord{
+			sessionAddressKey(relaystate.ChannelTypeTelegram, "10:42"): {
+				SessionID:   locator.SessionID,
+				ChannelType: relaystate.ChannelTypeTelegram,
+				AddressKey:  "10:42",
+				AddressJSON: `{"chat_id":10,"topic_id":42}`,
+				AgentName:   "old-persisted-label",
+				Status:      relaystate.SessionStatusActive,
+			},
+		},
+	}
+
+	m := &Manager{
+		rootAgentName: "new-root-provider",
+		agentBuilder:  builder,
+		logger:        zerolog.Nop(),
+		sessions:      make(map[string]*TopicSession),
+		sessionStore:  store,
+	}
+
+	_, err := m.RestoreSession(context.Background(), SessionContext{
+		Locator:                   locator,
+		UserID:                    "tg-201",
+		AllowRootProviderFallback: true,
+	})
+
+	if err != nil {
+		t.Fatalf("RestoreSession() error = %v", err)
+	}
+
+	if builder.lastBuiltAgentName != "new-root-provider" {
+		t.Fatalf("built with agent %q, want %q", builder.lastBuiltAgentName, "new-root-provider")
+	}
+
+	ts := m.sessions[locator.SessionID]
+	if ts.agentName != "old-persisted-label" {
+		t.Fatalf("session label = %q, want %q", ts.agentName, "old-persisted-label")
 	}
 }
 
