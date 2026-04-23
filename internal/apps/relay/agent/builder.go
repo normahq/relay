@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/normahq/norma/pkg/runtime/agentconfig"
 	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/relay/internal/git"
@@ -153,6 +154,12 @@ type BuiltAgent struct {
 	Session    session.Session
 }
 
+type AgentMetadata struct {
+	Type       string
+	Model      string
+	MCPServers []string
+}
+
 func (b *Builder) Build(ctx context.Context, sessionID, userID string, chatID int64, topicID int, agentName, workspaceDir string) (*BuiltAgent, error) {
 	return b.BuildWithMCPServerIDs(ctx, sessionID, userID, chatID, topicID, agentName, workspaceDir, nil, nil)
 }
@@ -256,6 +263,20 @@ func (b *Builder) GetAgentInfo(agentName string) (description string, mcpServers
 	return agentCfg.Description(agentName), mergeMCPServerIDs(agentCfg.MCPServers, nil, b.workspaceEnabled)
 }
 
+// GetAgentMetadata returns provider type/model and provider-scoped MCP server IDs.
+func (b *Builder) GetAgentMetadata(agentName string) AgentMetadata {
+	agentCfg, ok := b.normaCfg.Providers[agentName]
+	if !ok {
+		return AgentMetadata{}
+	}
+
+	return AgentMetadata{
+		Type:       strings.TrimSpace(agentCfg.Type),
+		Model:      modelFromAgentConfig(agentCfg),
+		MCPServers: normalizeStringIDs(agentCfg.MCPServers),
+	}
+}
+
 // ProviderIDs returns configured runtime provider IDs sorted lexicographically.
 func (b *Builder) ProviderIDs() []string {
 	if b == nil || len(b.normaCfg.Providers) == 0 {
@@ -323,6 +344,57 @@ func mergeMCPServerIDsWithBase(base, explicit, extra []string) []string {
 	}
 
 	return out
+}
+
+func normalizeStringIDs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func modelFromAgentConfig(cfg agentconfig.Config) string {
+	switch strings.TrimSpace(cfg.Type) {
+	case agentconfig.AgentTypeGenericACP:
+		if cfg.GenericACP != nil {
+			return strings.TrimSpace(cfg.GenericACP.Model)
+		}
+	case agentconfig.AgentTypeGeminiACP:
+		if cfg.GeminiACP != nil {
+			return strings.TrimSpace(cfg.GeminiACP.Model)
+		}
+	case agentconfig.AgentTypeCodexACP:
+		if cfg.CodexACP != nil {
+			return strings.TrimSpace(cfg.CodexACP.Model)
+		}
+	case agentconfig.AgentTypeOpenCodeACP:
+		if cfg.OpenCodeACP != nil {
+			return strings.TrimSpace(cfg.OpenCodeACP.Model)
+		}
+	case agentconfig.AgentTypeCopilotACP:
+		if cfg.CopilotACP != nil {
+			return strings.TrimSpace(cfg.CopilotACP.Model)
+		}
+	case agentconfig.AgentTypeClaudeCodeACP:
+		if cfg.ClaudeCodeACP != nil {
+			return strings.TrimSpace(cfg.ClaudeCodeACP.Model)
+		}
+	}
+	return ""
 }
 
 func composeAgentInstructions(normaInstruction, relayInstruction string) string {

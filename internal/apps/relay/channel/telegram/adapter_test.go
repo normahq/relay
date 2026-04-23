@@ -193,7 +193,7 @@ func TestCommandContextFromEvent_PrivateChatIgnoresMessageThreadID(t *testing.T)
 	isTopicMessage := false
 
 	got, ok := (&Adapter{}).CommandContextFromEvent(&events.CommandEvent{
-		Command: "new",
+		Command: "topic",
 		Args:    "codex",
 		Message: &client.Message{
 			MessageThreadId: &topicID,
@@ -221,7 +221,7 @@ func TestCommandContextFromEvent_PrivateTopicPreservesMessageThreadID(t *testing
 	isTopicMessage := true
 
 	got, ok := (&Adapter{}).CommandContextFromEvent(&events.CommandEvent{
-		Command: "new",
+		Command: "topic",
 		Args:    "codex",
 		Message: &client.Message{
 			MessageThreadId: &topicID,

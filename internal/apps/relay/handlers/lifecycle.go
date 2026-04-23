@@ -16,7 +16,6 @@ import (
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
 	"github.com/normahq/relay/internal/apps/relay/session"
-	"github.com/normahq/relay/internal/apps/relaymcp"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
 	"github.com/normahq/relay/internal/apps/workspacemcp"
 	"github.com/rs/zerolog"
@@ -47,8 +46,6 @@ func bundledRelayServerInstructions(workspaceEnabled bool) string {
 	instructions := `Use this bundled relay server for session-local relay tools.
 
 - relay.state stores persistent relay session and app state in relay.db.
-- relay.agents manages relay agent sessions and session metadata.
-- relay.agents.start requires explicit locator.channel_type plus locator.address and enforces caller session authorization for mutating tools.
 - relay config editing is not exposed through MCP; edit the relay config file directly.`
 	if workspaceEnabled {
 		instructions += "\n- relay.workspace is available and should be used for workspace import/export instead of manual branch landing."
@@ -133,9 +130,6 @@ func (m *InternalMCPManager) ensureBundledServers(ctx context.Context) error {
 	)
 
 	sessionmcp.RegisterTools(server, m.stateStore)
-
-	relaySvc := session.NewRelayMCPServer(m.sessionManager, m.channel, m.messenger, m.ownerStore)
-	relaymcp.RegisterTools(server, relaySvc)
 
 	if m.workspaceEnabled {
 		workspaceSvc := session.NewWorkspaceMCPServer(m.sessionManager)

@@ -54,8 +54,9 @@ func (l *Loader) Load() (Snapshot, error) {
 	_, err := runtimeconfig.LoadConfigDocument(
 		l.runtimeOpts,
 		runtimeconfig.AppLoadOptions{
-			AppName:      "relay",
-			DefaultsYAML: l.defaultsYAML,
+			AppName:            "relay",
+			DefaultsYAML:       l.defaultsYAML,
+			UseDotConfigAppDir: true,
 		},
 		&doc,
 	)

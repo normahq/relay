@@ -18,47 +18,48 @@ import (
 
 type commandSessionManager interface {
 	CreateSession(ctx context.Context, sessionCtx session.SessionContext, agentName string) error
-	GetAgentInfo(agentName string) (string, []string)
-	ProviderIDs() []string
+	GetAgentMetadata(agentName string) session.AgentMetadata
 	RootProviderID() string
 	StopSession(locator session.SessionLocator)
-	ValidateAgent(agentName string) error
 }
 
-// CommandHandler handles relay commands like /new and /close.
+// CommandHandler handles relay commands like /topic and /close.
 type CommandHandler struct {
-	ownerStore     *auth.OwnerStore
-	channel        *relaytelegram.Adapter
-	sessionManager commandSessionManager
-	turnDispatcher turnQueue
-	messenger      *messenger.Messenger
-	userHandler    *userHandler
+	ownerStore        *auth.OwnerStore
+	collaboratorStore *auth.CollaboratorStore
+	channel           *relaytelegram.Adapter
+	sessionManager    commandSessionManager
+	turnDispatcher    turnQueue
+	messenger         *messenger.Messenger
+	userHandler       *userHandler
 }
 
-func BuildAgentWelcomeMessage(agentName, sessionID, agentDesc string, mcpServers []string) string {
-	return relaywelcome.BuildAgentWelcomeMessage(agentName, sessionID, agentDesc, mcpServers)
+func BuildAgentWelcomeMessage(name, sessionID, agentType, model string, mcpServers []string) string {
+	return relaywelcome.BuildAgentWelcomeMessage(name, sessionID, agentType, model, mcpServers)
 }
 
 type commandHandlerParams struct {
 	fx.In
 
-	OwnerStore     *auth.OwnerStore
-	Channel        *relaytelegram.Adapter
-	SessionManager *session.Manager
-	TurnDispatcher *TurnDispatcher
-	Messenger      *messenger.Messenger
-	UserHandler    *userHandler
+	OwnerStore        *auth.OwnerStore
+	CollaboratorStore *auth.CollaboratorStore
+	Channel           *relaytelegram.Adapter
+	SessionManager    *session.Manager
+	TurnDispatcher    *TurnDispatcher
+	Messenger         *messenger.Messenger
+	UserHandler       *userHandler
 }
 
 // NewCommandHandler creates a new relay command handler.
 func NewCommandHandler(params commandHandlerParams) *CommandHandler {
 	return &CommandHandler{
-		ownerStore:     params.OwnerStore,
-		channel:        params.Channel,
-		sessionManager: params.SessionManager,
-		turnDispatcher: params.TurnDispatcher,
-		messenger:      params.Messenger,
-		userHandler:    params.UserHandler,
+		ownerStore:        params.OwnerStore,
+		collaboratorStore: params.CollaboratorStore,
+		channel:           params.Channel,
+		sessionManager:    params.SessionManager,
+		turnDispatcher:    params.TurnDispatcher,
+		messenger:         params.Messenger,
+		userHandler:       params.UserHandler,
 	}
 }
 
@@ -74,8 +75,8 @@ func (h *CommandHandler) onCommand(ctx context.Context, event *events.CommandEve
 	}
 
 	switch commandCtx.Command {
-	case "new":
-		return h.onNewCommand(ctx, commandCtx)
+	case "topic":
+		return h.onTopicCommand(ctx, commandCtx)
 	case "close":
 		return h.onCloseCommand(ctx, commandCtx)
 	case "cancel":
@@ -88,9 +89,9 @@ func (h *CommandHandler) onCommand(ctx context.Context, event *events.CommandEve
 	}
 }
 
-func (h *CommandHandler) onNewCommand(ctx context.Context, commandCtx relaytelegram.CommandContext) error {
-	if !h.ownerStore.HasOwner() || !h.ownerStore.IsOwner(commandCtx.UserID) {
-		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner can use this command."); err != nil {
+func (h *CommandHandler) onTopicCommand(ctx context.Context, commandCtx relaytelegram.CommandContext) error {
+	if !h.canUseSessionCommand(ctx, commandCtx.UserID) {
+		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner or collaborators can use this command."); err != nil {
 			return err
 		}
 		return nil
@@ -103,12 +104,16 @@ func (h *CommandHandler) onNewCommand(ctx context.Context, commandCtx relayteleg
 		return nil
 	}
 
-	providerID := strings.TrimSpace(commandCtx.Args)
-	if providerID == "" {
-		providerID = h.sessionManager.RootProviderID()
+	topicName := strings.TrimSpace(commandCtx.Args)
+	if topicName == "" {
+		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Usage: /topic <name>"); err != nil {
+			return err
+		}
+		return nil
 	}
-	if providerID == "" {
-		if err := h.channel.SendPlain(ctx, commandCtx.Locator, h.newCommandUsageMessage(true)); err != nil {
+	rootProviderID := strings.TrimSpace(h.sessionManager.RootProviderID())
+	if rootProviderID == "" {
+		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "relay.provider is not configured."); err != nil {
 			return err
 		}
 		return nil
@@ -117,21 +122,13 @@ func (h *CommandHandler) onNewCommand(ctx context.Context, commandCtx relayteleg
 	log.Info().
 		Int64("user_id", commandCtx.UserID).
 		Int64("chat_id", commandCtx.ChatID).
-		Str("provider", providerID).
-		Msg("Creating new topic with provider")
+		Str("topic_name", topicName).
+		Msg("creating topic session")
 
-	if err := h.sessionManager.ValidateAgent(providerID); err != nil {
-		log.Error().Err(err).Str("provider", providerID).Msg("provider validation failed, not creating topic")
-		if sendErr := h.channel.SendPlain(ctx, commandCtx.Locator, fmt.Sprintf("Failed to create provider session: provider %q not available: %v", providerID, err)); sendErr != nil {
-			return sendErr
-		}
-		return nil
-	}
-
-	topicLocator, err := h.channel.CreateTopicLocator(ctx, commandCtx.ChatID, fmt.Sprintf("Relay: %s", providerID))
+	topicLocator, err := h.channel.CreateTopicLocator(ctx, commandCtx.ChatID, fmt.Sprintf("Relay: %s", topicName))
 	if err != nil {
-		log.Error().Err(err).Str("provider", providerID).Msg("Failed to create topic with provider")
-		if sendErr := h.channel.SendPlain(ctx, commandCtx.Locator, fmt.Sprintf("Failed to create provider session: %v", err)); sendErr != nil {
+		log.Error().Err(err).Str("topic_name", topicName).Msg("failed to create topic")
+		if sendErr := h.channel.SendPlain(ctx, commandCtx.Locator, fmt.Sprintf("Failed to create topic session: %v", err)); sendErr != nil {
 			return sendErr
 		}
 		return nil
@@ -139,20 +136,20 @@ func (h *CommandHandler) onNewCommand(ctx context.Context, commandCtx relayteleg
 	if err := h.sessionManager.CreateSession(ctx, session.SessionContext{
 		Locator: topicLocator,
 		UserID:  session.TelegramUserID(commandCtx.UserID),
-	}, providerID); err != nil {
-		log.Error().Err(err).Str("provider", providerID).Msg("Failed to create provider session after topic creation")
+	}, topicName); err != nil {
+		log.Error().Err(err).Str("topic_name", topicName).Msg("failed to create topic session after topic creation")
 		_ = h.channel.Close(ctx, topicLocator)
-		if sendErr := h.channel.SendPlain(ctx, commandCtx.Locator, fmt.Sprintf("Failed to create provider session: %v", err)); sendErr != nil {
+		if sendErr := h.channel.SendPlain(ctx, commandCtx.Locator, fmt.Sprintf("Failed to create topic session: %v", err)); sendErr != nil {
 			return sendErr
 		}
 		return nil
 	}
 
-	agentDesc, mcpServers := h.sessionManager.GetAgentInfo(providerID)
+	metadata := h.sessionManager.GetAgentMetadata(rootProviderID)
 
-	welcomeMsg := BuildAgentWelcomeMessage(providerID, topicLocator.SessionID, agentDesc, mcpServers)
+	welcomeMsg := BuildAgentWelcomeMessage(topicName, topicLocator.SessionID, metadata.Type, metadata.Model, metadata.MCPServers)
 	if err := h.channel.SendMarkdown(ctx, topicLocator, welcomeMsg); err != nil {
-		log.Error().Err(err).Msg("Failed to send welcome message")
+		log.Error().Err(err).Msg("failed to send welcome message")
 		return err
 	}
 
@@ -160,8 +157,8 @@ func (h *CommandHandler) onNewCommand(ctx context.Context, commandCtx relayteleg
 }
 
 func (h *CommandHandler) onCloseCommand(ctx context.Context, commandCtx relaytelegram.CommandContext) error {
-	if !h.ownerStore.HasOwner() || !h.ownerStore.IsOwner(commandCtx.UserID) {
-		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner can use this command."); err != nil {
+	if !h.canUseSessionCommand(ctx, commandCtx.UserID) {
+		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner or collaborators can use this command."); err != nil {
 			return err
 		}
 		return nil
@@ -206,8 +203,8 @@ func (h *CommandHandler) onCloseCommand(ctx context.Context, commandCtx relaytel
 }
 
 func (h *CommandHandler) onCancelCommand(ctx context.Context, commandCtx relaytelegram.CommandContext) error {
-	if !h.ownerStore.HasOwner() || !h.ownerStore.IsOwner(commandCtx.UserID) {
-		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner can use this command."); err != nil {
+	if !h.canUseSessionCommand(ctx, commandCtx.UserID) {
+		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Only the bot owner or collaborators can use this command."); err != nil {
 			return err
 		}
 		return nil
@@ -256,22 +253,17 @@ func (h *CommandHandler) onCancelCommand(ctx context.Context, commandCtx relayte
 	return nil
 }
 
-func (h *CommandHandler) newCommandUsageMessage(rootMissing bool) string {
-	usage := "Usage: /new [provider_id]"
-	providerIDs := h.sessionManager.ProviderIDs()
-	if len(providerIDs) == 0 {
-		if rootMissing {
-			return usage + "\n\nrelay.provider is not configured.\nNo providers configured under runtime.providers in relay config."
-		}
-		return usage + "\n\nNo providers configured under runtime.providers in relay config."
+func (h *CommandHandler) canUseSessionCommand(ctx context.Context, userID int64) bool {
+	if h.ownerStore != nil && h.ownerStore.IsOwner(userID) {
+		return true
 	}
-
-	lines := []string{usage}
-	if rootMissing {
-		lines = append(lines, "", "relay.provider is not configured.")
-	} else if rootProviderID := strings.TrimSpace(h.sessionManager.RootProviderID()); rootProviderID != "" {
-		lines = append(lines, "", "Default provider: "+rootProviderID)
+	if h.collaboratorStore == nil {
+		return false
 	}
-	lines = append(lines, "", "Available providers: "+strings.Join(providerIDs, ", "))
-	return strings.Join(lines, "\n")
+	_, found, err := h.collaboratorStore.GetCollaborator(ctx, fmt.Sprintf("%d", userID))
+	if err != nil {
+		log.Warn().Err(err).Int64("user_id", userID).Msg("failed to check collaborator access")
+		return false
+	}
+	return found
 }

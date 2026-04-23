@@ -45,8 +45,9 @@ func startCommand() *cobra.Command {
 					Profile:    viper.GetString("profile"),
 				},
 				appconfig.AppLoadOptions{
-					AppName:      "relay",
-					DefaultsYAML: defaultRelayConfig,
+					AppName:            "relay",
+					DefaultsYAML:       defaultRelayConfig,
+					UseDotConfigAppDir: true,
 				},
 				&doc,
 			)

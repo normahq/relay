@@ -38,8 +38,9 @@ profiles:
 	selectedProfile, err := appconfig.LoadConfigDocument(
 		appconfig.RuntimeLoadOptions{WorkingDir: workingDir, Profile: testRelayDefaultProfile},
 		appconfig.AppLoadOptions{
-			AppName:      "relay",
-			DefaultsYAML: defaultRelayConfig,
+			AppName:            "relay",
+			DefaultsYAML:       defaultRelayConfig,
+			UseDotConfigAppDir: true,
 		},
 		&doc,
 	)
@@ -83,8 +84,9 @@ relay:
 	selectedProfile, err := appconfig.LoadConfigDocument(
 		appconfig.RuntimeLoadOptions{WorkingDir: workingDir},
 		appconfig.AppLoadOptions{
-			AppName:      "relay",
-			DefaultsYAML: defaultRelayConfig,
+			AppName:            "relay",
+			DefaultsYAML:       defaultRelayConfig,
+			UseDotConfigAppDir: true,
 		},
 		&doc,
 	)
@@ -122,8 +124,9 @@ relay:
 	_, err := appconfig.LoadConfigDocument(
 		appconfig.RuntimeLoadOptions{WorkingDir: workingDir, Profile: testRelayDefaultProfile},
 		appconfig.AppLoadOptions{
-			AppName:      "relay",
-			DefaultsYAML: defaultRelayConfig,
+			AppName:            "relay",
+			DefaultsYAML:       defaultRelayConfig,
+			UseDotConfigAppDir: true,
 		},
 		&doc,
 	)

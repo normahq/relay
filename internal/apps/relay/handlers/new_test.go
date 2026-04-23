@@ -5,19 +5,29 @@ import (
 	"testing"
 )
 
-func TestBuildAgentWelcomeMessage_StartingWithoutSessionID(t *testing.T) {
-	msg := BuildAgentWelcomeMessage("opencode", "", "desc", []string{"relay"})
-	if !strings.Contains(msg, "Starting **opencode** agent session.") {
-		t.Fatalf("message = %q, want starting text", msg)
-	}
-	if strings.Contains(msg, "session ()") {
-		t.Fatalf("message = %q, must not include empty session id", msg)
+func TestBuildAgentWelcomeMessage_FormatsStableKVLine(t *testing.T) {
+	msg := BuildAgentWelcomeMessage("topic-alpha", "tg-1-2", "opencode_acp", "gpt-5", []string{"mcp.one", "mcp.two"})
+	want := "name=topic-alpha session=tg-1-2 type=opencode_acp model=gpt-5 mcp=mcp.one,mcp.two"
+	if msg != want {
+		t.Fatalf("message = %q, want %q", msg, want)
 	}
 }
 
-func TestBuildAgentWelcomeMessage_StartedWithSessionID(t *testing.T) {
-	msg := BuildAgentWelcomeMessage("opencode", "tg-1-2", "desc", nil)
-	if !strings.Contains(msg, "Started new **opencode** agent session (tg-1-2).") {
-		t.Fatalf("message = %q, want started text with session id", msg)
+func TestBuildAgentWelcomeMessage_UsesNonePlaceholders(t *testing.T) {
+	msg := BuildAgentWelcomeMessage(" ", " ", " ", " ", nil)
+	if !strings.Contains(msg, "name=none") {
+		t.Fatalf("message = %q, want name=none", msg)
+	}
+	if !strings.Contains(msg, "session=none") {
+		t.Fatalf("message = %q, want session=none", msg)
+	}
+	if !strings.Contains(msg, "type=none") {
+		t.Fatalf("message = %q, want type=none", msg)
+	}
+	if !strings.Contains(msg, "model=none") {
+		t.Fatalf("message = %q, want model=none", msg)
+	}
+	if !strings.Contains(msg, "mcp=none") {
+		t.Fatalf("message = %q, want mcp=none", msg)
 	}
 }

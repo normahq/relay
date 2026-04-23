@@ -4,7 +4,7 @@
 [![lint](https://github.com/normahq/relay/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/normahq/relay/actions/workflows/lint.yml)
 
 Relay is a Telegram-first control plane for long-running Norma agent sessions.
-It gives you one authenticated owner channel, root orchestration in direct chat, and topic-scoped sessions started with `/new`.
+It gives you one authenticated owner channel, root orchestration in direct chat, and topic-scoped sessions started with `/topic <name>`.
 
 ## Install
 
@@ -40,15 +40,15 @@ relay start
 4. Start a topic session:
 
 ```text
-/new [provider_id]
+/topic <name>
 ```
 
 ## Bot Commands
 
 - `/start <owner_token>`: direct-message auth/bootstrap (also accepts collaborator invite token).
-- `/new [provider_id]`: owner only, direct message only; starts a topic session (uses `relay.provider` when omitted).
-- `/close`: owner only, direct message only; closes current topic session or stops root session.
-- `/cancel`: owner only; cancels in-flight turn and drops queued turns for current session.
+- `/topic <name>`: owner/collaborator, direct message only; starts a topic session with a required free-form name.
+- `/close`: owner/collaborator, direct message only; closes current topic session or stops root session.
+- `/cancel`: owner/collaborator; cancels in-flight turn and drops queued turns for current session.
 - `/user add`: owner only; generates collaborator invite link.
 - `/user list`: owner only; lists collaborators and active invites.
 - `/user remove <user_id>`: owner only; removes a collaborator.
@@ -82,8 +82,8 @@ profiles: {}
 - `relay.provider is required`:
   - run `relay init` and choose a provider, or
   - set `relay.provider` to a value from `runtime.providers`
-- `provider "<id>" not available` on `/new`:
-  - use one of the provider IDs registered in `runtime.providers`
+- `relay.provider is not configured` on `/topic <name>`:
+  - set `relay.provider` to a value from `runtime.providers`
 - workspace import/export issues:
   - verify `relay.workspace.mode` and `relay.workspace.base_branch`
   - when `mode: on`, run relay in a Git repository

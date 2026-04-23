@@ -33,6 +33,11 @@ type relayAuthorizer struct {
 	collaboratorStore *auth.CollaboratorStore
 }
 
+const (
+	rootSessionLabel = "relay"
+	autoSessionLabel = "auto"
+)
+
 func (a *relayAuthorizer) IsOwner(userID int64) bool {
 	return a.ownerStore.IsOwner(userID)
 }
@@ -175,13 +180,13 @@ func (h *RelayHandler) bootstrapRootSession(ctx context.Context, ownerID, chatID
 	ts, err := h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
 		Locator: locator,
 		UserID:  transportUserID,
-	}, rootAgentName)
+	}, rootSessionLabel)
 	if err != nil {
 		return fmt.Errorf("create root session: %w", err)
 	}
 
-	agentDesc, mcpServers := h.sessionManager.GetAgentInfo(rootAgentName)
-	welcomeMsg := BuildAgentWelcomeMessage(rootAgentName, ts.GetSessionID(), agentDesc, mcpServers)
+	metadata := h.sessionManager.GetAgentMetadata(rootAgentName)
+	welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 	_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 
 	h.logger.Info().
@@ -253,6 +258,7 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 			}
 		} else {
 			existingSession, _ := h.sessionManager.GetSession(locator)
+			sendRootWelcome := existingSession == nil
 			if existingSession == nil {
 				if err := h.refreshRuntimeConfig(); err != nil {
 					h.logger.Error().Err(err).Int64("chat_id", locatorChatID(locator)).Msg("failed to refresh runtime config before root session creation")
@@ -264,9 +270,6 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 					_ = h.channel.SendPlain(ctx, locator, "Relay root provider is not configured (`relay.provider`). Please close this chat and restart relay.")
 					return nil
 				}
-				agentDesc, mcpServers := h.sessionManager.GetAgentInfo(rootAgentName)
-				spinningMsg := BuildAgentWelcomeMessage(rootAgentName, "", agentDesc, mcpServers)
-				_ = h.channel.SendMarkdown(ctx, locator, spinningMsg)
 			}
 			rootAgentName := h.getProviderName()
 			if rootAgentName == "" {
@@ -276,22 +279,26 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 			ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
 				Locator: locator,
 				UserID:  transportUserID,
-			}, rootAgentName)
+			}, rootSessionLabel)
 			if err != nil {
 				log.Error().Err(err).Str("agent", rootAgentName).Msg("failed to ensure root session")
 				_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start root session: %v.\n\nPlease close this chat and start again.", err))
 				return nil
 			}
+			if sendRootWelcome {
+				metadata := h.sessionManager.GetAgentMetadata(rootAgentName)
+				welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
+				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
+			}
 		}
 	} else {
-		welcomeSent := false
 		ts, err = h.sessionManager.GetSession(locator)
 		if err != nil {
 			_ = h.channel.SendPlain(ctx, locator, "Restoring agent session...")
 			ts, err = h.sessionManager.RestoreSession(ctx, relaysession.SessionContext{
 				Locator:                   locator,
 				UserID:                    transportUserID,
-				AllowRootProviderFallback: messageCtx.IsDM,
+				AllowRootProviderFallback: false,
 			})
 			if err != nil {
 				if errors.Is(err, relaysession.ErrNoPersistedSession) {
@@ -305,29 +312,25 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 						_ = h.channel.SendPlain(ctx, locator, "Relay root provider is not configured (`relay.provider`). Please close this chat and restart relay.")
 						return nil
 					}
-					agentDesc, mcpServers := h.sessionManager.GetAgentInfo(rootAgentName)
-					startMsg := BuildAgentWelcomeMessage(rootAgentName, locator.SessionID, agentDesc, mcpServers)
-					_ = h.channel.SendMarkdown(ctx, locator, startMsg)
-					welcomeSent = true
-
 					ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
 						Locator: locator,
 						UserID:  transportUserID,
-					}, rootAgentName)
+					}, autoSessionLabel)
 					if err != nil {
 						log.Error().Err(err).Str("agent", rootAgentName).Int("topic_id", topicID).Msg("failed to create topic session")
-						_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start topic session: %v.\n\nPlease close this chat topic and create a new session with /new [provider_id].", err))
+						_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start topic session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
 						return nil
 					}
 				} else {
 					log.Warn().Err(err).Int("topic_id", topicID).Msg("failed to restore topic session")
-					_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to restore this session: %v.\n\nPlease close this chat topic and create a new session with /new [provider_id].", err))
+					_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to restore this session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
 					return nil
 				}
 			}
-			if ts != nil && !welcomeSent {
-				agentDesc, mcpServers := h.sessionManager.GetAgentInfo(ts.GetAgentName())
-				welcomeMsg := BuildAgentWelcomeMessage(ts.GetAgentName(), ts.GetSessionID(), agentDesc, mcpServers)
+			if ts != nil {
+				rootProviderID := h.getProviderName()
+				metadata := h.sessionManager.GetAgentMetadata(rootProviderID)
+				welcomeMsg := BuildAgentWelcomeMessage(ts.GetAgentName(), ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 			}
 		}
@@ -430,7 +433,7 @@ func (h *RelayHandler) runTurnTask(
 	log.Error().Err(err).Int("topic_id", topicID).Msg("agent execution failed")
 	errText := fmt.Sprintf("Agent execution failed: %v.\n\nPlease close this chat and start a new session.", err)
 	if topicID > 0 {
-		errText = fmt.Sprintf("Agent execution failed: %v.\n\nPlease close this chat topic and create a new session with /new [provider_id].", err)
+		errText = fmt.Sprintf("Agent execution failed: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err)
 	}
 	if sendErr := h.channel.SendPlain(context.Background(), locator, errText); sendErr != nil {
 		log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send relay error message")

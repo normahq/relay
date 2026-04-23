@@ -105,13 +105,33 @@ func TestCommandHandlerOnCommand_CloseUnauthorized(t *testing.T) {
 	if len(turns.cancelCalls) != 0 {
 		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
 	}
-	assertLastSentContains(t, tgClient, "Only the bot owner can use this command.")
+	assertLastSentContains(t, tgClient, "Only the bot owner or collaborators can use this command.")
 }
 
-func TestCommandHandlerOnCommand_NewInGroupChat_Rejects(t *testing.T) {
+func TestCommandHandlerOnCommand_CloseCollaboratorAllowed(t *testing.T) {
 	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
 
-	err := handler.onCommand(context.Background(), newCommandEventWithChatType("new", "alpha", 101, 9001, nil, "supergroup"))
+	topicID := 33
+	err := handler.onCommand(context.Background(), newCommandEvent("close", "", 202, 9001, &topicID))
+	if err != nil {
+		t.Fatalf("onCommand() error = %v", err)
+	}
+
+	if len(tgClient.closedTopicIDs) != 1 {
+		t.Fatalf("CloseTopic calls = %d, want 1", len(tgClient.closedTopicIDs))
+	}
+	if len(sm.stopCalls) != 1 {
+		t.Fatalf("StopSession calls = %d, want 1", len(sm.stopCalls))
+	}
+	if len(turns.cancelCalls) != 1 {
+		t.Fatalf("CancelSession calls = %d, want 1", len(turns.cancelCalls))
+	}
+}
+
+func TestCommandHandlerOnCommand_TopicInGroupChat_Rejects(t *testing.T) {
+	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
+
+	err := handler.onCommand(context.Background(), newCommandEventWithChatType("topic", "alpha", 101, 9001, nil, "supergroup"))
 	if err != nil {
 		t.Fatalf("onCommand() error = %v", err)
 	}
@@ -146,37 +166,28 @@ func TestCommandHandlerOnCommand_CloseInGroupChat_Rejects(t *testing.T) {
 	assertLastSentContains(t, tgClient, "This command is only available in direct messages.")
 }
 
-func TestCommandHandlerOnCommand_NewWithoutArgs_DefaultsToRootProvider(t *testing.T) {
+func TestCommandHandlerOnCommand_TopicWithoutArgs_ShowsUsage(t *testing.T) {
 	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
-	tgClient.nextTopicID = 600
 
-	err := handler.onCommand(context.Background(), newCommandEvent("new", "", 101, 9001, nil))
+	err := handler.onCommand(context.Background(), newCommandEvent("topic", "", 101, 9001, nil))
 	if err != nil {
 		t.Fatalf("onCommand() error = %v", err)
 	}
 
-	if len(sm.createCalls) != 1 {
-		t.Fatalf("CreateSession calls = %d, want 1", len(sm.createCalls))
-	}
-	if sm.createCalls[0].AgentName != testProviderAlpha {
-		t.Fatalf("CreateSession provider = %q, want %s", sm.createCalls[0].AgentName, testProviderAlpha)
+	if len(sm.createCalls) != 0 {
+		t.Fatalf("CreateSession calls = %d, want 0", len(sm.createCalls))
 	}
 	if len(turns.cancelCalls) != 0 {
 		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
 	}
-	if len(tgClient.createdTopics) != 1 {
-		t.Fatalf("CreateTopic calls = %d, want 1", len(tgClient.createdTopics))
-	}
-	if tgClient.createdTopics[0].Name != "Relay: alpha" {
-		t.Fatalf("CreateTopic name = %q, want %q", tgClient.createdTopics[0].Name, "Relay: alpha")
-	}
+	assertLastSentContains(t, tgClient, "Usage: /topic <name>")
 }
 
-func TestCommandHandlerOnCommand_NewCreatesTopicSession(t *testing.T) {
+func TestCommandHandlerOnCommand_TopicCreatesTopicSession(t *testing.T) {
 	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
 	tgClient.nextTopicID = 456
 
-	err := handler.onCommand(context.Background(), newCommandEvent("new", "alpha", 101, 9001, nil))
+	err := handler.onCommand(context.Background(), newCommandEvent("topic", "alpha", 101, 9001, nil))
 	if err != nil {
 		t.Fatalf("onCommand() error = %v", err)
 	}
@@ -196,15 +207,39 @@ func TestCommandHandlerOnCommand_NewCreatesTopicSession(t *testing.T) {
 	if sm.createCalls[0].SessionID != "tg-9001-456" || sm.createCalls[0].UserID != "tg-101" || sm.createCalls[0].AgentName != "alpha" {
 		t.Fatalf("CreateSession call = %+v, want session=tg-9001-456 user=tg-101 agent=alpha", sm.createCalls[0])
 	}
-	assertLastSentContains(t, tgClient, "tg\\-9001\\-456")
-	assertLastSentContains(t, tgClient, "***alpha***")
+	assertLastSentContains(t, tgClient, "name\\=alpha")
+	assertLastSentContains(t, tgClient, "session\\=tg\\-9001\\-456")
+	assertLastSentContains(t, tgClient, "type\\=opencode\\_acp")
+	assertLastSentContains(t, tgClient, "model\\=gpt\\-5")
+	assertLastSentContains(t, tgClient, "mcp\\=provider\\_mcp")
 }
 
-func TestCommandHandlerOnCommand_NewWithoutArgs_NoRootProvider_ShowsUsage(t *testing.T) {
+func TestCommandHandlerOnCommand_TopicCollaboratorAllowed(t *testing.T) {
+	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
+	tgClient.nextTopicID = 457
+
+	err := handler.onCommand(context.Background(), newCommandEvent("topic", "ops run", 202, 9001, nil))
+	if err != nil {
+		t.Fatalf("onCommand() error = %v", err)
+	}
+
+	if len(sm.createCalls) != 1 {
+		t.Fatalf("CreateSession calls = %d, want 1", len(sm.createCalls))
+	}
+	if sm.createCalls[0].AgentName != "ops run" {
+		t.Fatalf("CreateSession agent label = %q, want %q", sm.createCalls[0].AgentName, "ops run")
+	}
+	if len(turns.cancelCalls) != 0 {
+		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
+	}
+	assertLastSentContains(t, tgClient, "name\\=ops run")
+}
+
+func TestCommandHandlerOnCommand_TopicNoRootProvider_ShowsError(t *testing.T) {
 	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
 	sm.rootProvider = ""
 
-	err := handler.onCommand(context.Background(), newCommandEvent("new", "", 101, 9001, nil))
+	err := handler.onCommand(context.Background(), newCommandEvent("topic", "alpha", 101, 9001, nil))
 	if err != nil {
 		t.Fatalf("onCommand() error = %v", err)
 	}
@@ -214,9 +249,25 @@ func TestCommandHandlerOnCommand_NewWithoutArgs_NoRootProvider_ShowsUsage(t *tes
 	if len(turns.cancelCalls) != 0 {
 		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
 	}
-	assertLastSentContains(t, tgClient, "Usage: /new [provider_id]")
 	assertLastSentContains(t, tgClient, "relay.provider is not configured.")
-	assertLastSentContains(t, tgClient, "Available providers: alpha, beta")
+}
+
+func TestCommandHandlerOnCommand_NewIsIgnored(t *testing.T) {
+	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
+
+	err := handler.onCommand(context.Background(), newCommandEvent("new", "alpha", 101, 9001, nil))
+	if err != nil {
+		t.Fatalf("onCommand() error = %v", err)
+	}
+	if len(sm.createCalls) != 0 {
+		t.Fatalf("CreateSession calls = %d, want 0", len(sm.createCalls))
+	}
+	if len(turns.cancelCalls) != 0 {
+		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
+	}
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("sent messages = %d, want 0", len(tgClient.messages))
+	}
 }
 
 func TestCommandHandlerOnCommand_CancelClearsQueueAndInFlight(t *testing.T) {
@@ -279,14 +330,28 @@ func TestCommandHandlerOnCommand_CancelUnauthorized(t *testing.T) {
 	if len(turns.cancelCalls) != 0 {
 		t.Fatalf("CancelSession calls = %d, want 0", len(turns.cancelCalls))
 	}
-	assertLastSentContains(t, tgClient, "Only the bot owner can use this command.")
+	assertLastSentContains(t, tgClient, "Only the bot owner or collaborators can use this command.")
+}
+
+func TestCommandHandlerOnCommand_CancelCollaboratorAllowed(t *testing.T) {
+	handler, _, turns, tgClient := newCommandHandlerTestHarness(t)
+
+	err := handler.onCommand(context.Background(), newCommandEvent("cancel", "", 202, 9001, nil))
+	if err != nil {
+		t.Fatalf("onCommand() error = %v", err)
+	}
+
+	if len(turns.cancelCalls) != 1 {
+		t.Fatalf("CancelSession calls = %d, want 1", len(turns.cancelCalls))
+	}
+	assertLastSentContains(t, tgClient, "No running or queued turns for this session.")
 }
 
 type fakeCommandSessionManager struct {
 	stopCalls    []stopSessionCall
 	createCalls  []createSessionCall
 	rootProvider string
-	providerIDs  []string
+	metadata     session.AgentMetadata
 }
 
 type createSessionCall struct {
@@ -313,12 +378,8 @@ func (f *fakeCommandSessionManager) CreateSession(_ context.Context, sessionCtx 
 	return nil
 }
 
-func (f *fakeCommandSessionManager) GetAgentInfo(string) (string, []string) {
-	return "", nil
-}
-
-func (f *fakeCommandSessionManager) ProviderIDs() []string {
-	return append([]string(nil), f.providerIDs...)
+func (f *fakeCommandSessionManager) GetAgentMetadata(string) session.AgentMetadata {
+	return f.metadata
 }
 
 func (f *fakeCommandSessionManager) RootProviderID() string {
@@ -327,10 +388,6 @@ func (f *fakeCommandSessionManager) RootProviderID() string {
 
 func (f *fakeCommandSessionManager) StopSession(locator session.SessionLocator) {
 	f.stopCalls = append(f.stopCalls, stopSessionCall{SessionID: locator.SessionID})
-}
-
-func (f *fakeCommandSessionManager) ValidateAgent(string) error {
-	return nil
 }
 
 type fakeTurnDispatcher struct {
@@ -369,15 +426,25 @@ func newCommandHandlerTestHarness(t *testing.T) (*CommandHandler, *fakeCommandSe
 	if err != nil {
 		t.Fatalf("RegisterOwner(): %v", err)
 	}
+	collaboratorStore := auth.NewCollaboratorStore(&fakeCollaboratorBackend{
+		entries: map[string]auth.Collaborator{
+			"202": {UserID: "202"},
+		},
+	})
 
 	tgClient := &fakeTelegramClient{}
 	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
 	sessionManager := &fakeCommandSessionManager{}
 	turnDispatcher := &fakeTurnDispatcher{}
 	sessionManager.rootProvider = testProviderAlpha
-	sessionManager.providerIDs = []string{testProviderAlpha, "beta"}
+	sessionManager.metadata = session.AgentMetadata{
+		Type:       "opencode_acp",
+		Model:      "gpt-5",
+		MCPServers: []string{"provider_mcp"},
+	}
 	handler := &CommandHandler{
-		ownerStore: ownerStore,
+		ownerStore:        ownerStore,
+		collaboratorStore: collaboratorStore,
 		channel: relaytelegram.NewAdapter(relaytelegram.AdapterParams{
 			Messenger: msg,
 			TGClient:  tgClient,
@@ -388,6 +455,40 @@ func newCommandHandlerTestHarness(t *testing.T) (*CommandHandler, *fakeCommandSe
 		messenger:      msg,
 	}
 	return handler, sessionManager, turnDispatcher, tgClient
+}
+
+type fakeCollaboratorBackend struct {
+	entries map[string]auth.Collaborator
+}
+
+func (f *fakeCollaboratorBackend) AddCollaborator(_ context.Context, c auth.Collaborator) error {
+	if f.entries == nil {
+		f.entries = make(map[string]auth.Collaborator)
+	}
+	f.entries[c.UserID] = c
+	return nil
+}
+
+func (f *fakeCollaboratorBackend) RemoveCollaborator(_ context.Context, userID string) error {
+	delete(f.entries, userID)
+	return nil
+}
+
+func (f *fakeCollaboratorBackend) GetCollaborator(_ context.Context, userID string) (*auth.Collaborator, bool, error) {
+	entry, ok := f.entries[userID]
+	if !ok {
+		return nil, false, nil
+	}
+	c := entry
+	return &c, true, nil
+}
+
+func (f *fakeCollaboratorBackend) ListCollaborators(context.Context) ([]auth.Collaborator, error) {
+	out := make([]auth.Collaborator, 0, len(f.entries))
+	for _, entry := range f.entries {
+		out = append(out, entry)
+	}
+	return out, nil
 }
 
 func newCommandEvent(command, args string, userID, chatID int64, topicID *int) *events.CommandEvent {

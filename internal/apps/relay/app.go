@@ -274,7 +274,6 @@ var removedBuiltInRelayMCPServerIDs = map[string]string{
 	"runtime.relay":     bundledRelayMCPServerID,
 	"relay.state":       bundledRelayMCPServerID,
 	"relay.workspace":   bundledRelayMCPServerID,
-	"relay.agents":      bundledRelayMCPServerID,
 }
 
 var removedConfigMCPServerIDs = map[string]struct{}{

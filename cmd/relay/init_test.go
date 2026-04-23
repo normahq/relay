@@ -441,8 +441,9 @@ func TestInitCommand_GeneratedConfigLoadableByRelayLoader(t *testing.T) {
 	selectedProfile, err := appconfig.LoadConfigDocument(
 		appconfig.RuntimeLoadOptions{WorkingDir: workingDir},
 		appconfig.AppLoadOptions{
-			AppName:      "relay",
-			DefaultsYAML: defaultRelayConfig,
+			AppName:            "relay",
+			DefaultsYAML:       defaultRelayConfig,
+			UseDotConfigAppDir: true,
 		},
 		&doc,
 	)

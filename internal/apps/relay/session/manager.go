@@ -41,8 +41,11 @@ type agentBuilder interface {
 	) (*relayagent.BuiltAgent, error)
 	ValidateAgent(agentName string) error
 	GetAgentInfo(agentName string) (string, []string)
+	GetAgentMetadata(agentName string) relayagent.AgentMetadata
 	ProviderIDs() []string
 }
+
+type AgentMetadata = relayagent.AgentMetadata
 
 // Manager manages relay ADK sessions and persists session metadata.
 type Manager struct {
@@ -146,6 +149,17 @@ func (m *Manager) GetAgentInfo(agentName string) (string, []string) {
 	}
 	description, mcpServers := builder.GetAgentInfo(agentName)
 	return description, mergeUniqueStringIDs(mcpServers, relayMCPServerIDs)
+}
+
+// GetAgentMetadata returns root-provider metadata with provider-scoped MCP IDs.
+func (m *Manager) GetAgentMetadata(agentName string) AgentMetadata {
+	m.mu.RLock()
+	builder := m.agentBuilder
+	m.mu.RUnlock()
+	if builder == nil {
+		return AgentMetadata{}
+	}
+	return builder.GetAgentMetadata(agentName)
 }
 
 // ProviderIDs returns configured runtime provider IDs sorted lexicographically.
@@ -518,38 +532,22 @@ func (m *Manager) RestoreSession(ctx context.Context, sessionCtx SessionContext)
 	if err != nil {
 		return nil, fmt.Errorf("decode persisted session locator: %w", err)
 	}
-
-	resolvedAgentName, usedFallback, fallbackReason, err := resolveRestoreAgentName(
-		record.AgentName,
-		m.getProviderName(),
-		sessionCtx.AllowRootProviderFallback,
-		m.ValidateAgent,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("resolve persisted session agent for %s: %w", locator.AddressKey, err)
+	sessionLabel := strings.TrimSpace(record.AgentName)
+	if sessionLabel == "" {
+		sessionLabel = "auto"
 	}
 
 	m.logger.Info().
 		Str("session_id", sessionID).
 		Str("channel_type", recordLocator.ChannelType).
 		Str("address_key", recordLocator.AddressKey).
-		Str("agent", record.AgentName).
+		Str("label", sessionLabel).
 		Msg("restoring session from persisted metadata")
-	if usedFallback {
-		m.logger.Warn().
-			Str("session_id", sessionID).
-			Str("channel_type", recordLocator.ChannelType).
-			Str("address_key", recordLocator.AddressKey).
-			Str("persisted_agent", strings.TrimSpace(record.AgentName)).
-			Str("fallback_agent", resolvedAgentName).
-			Str("reason", fallbackReason).
-			Msg("persisted session agent unavailable; falling back to root provider")
-	}
 
 	return m.EnsureSession(ctx, SessionContext{
 		Locator: recordLocator,
 		UserID:  sessionCtx.UserID,
-	}, resolvedAgentName)
+	}, sessionLabel)
 }
 
 // RestoreTelegramSession restores a Telegram session from persisted metadata.
@@ -774,49 +772,6 @@ func sessionStatusForInactiveRecord(recordStatus string) string {
 		return sessionStatusPersisted
 	}
 	return recordStatus
-}
-
-func resolveRestoreAgentName(
-	persistedAgentName string,
-	rootAgentName string,
-	allowRootProviderFallback bool,
-	validate func(agentName string) error,
-) (resolvedAgentName string, usedFallback bool, fallbackReason string, err error) {
-	if validate == nil {
-		return "", false, "", fmt.Errorf("agent validator is required")
-	}
-
-	persisted := strings.TrimSpace(persistedAgentName)
-	root := strings.TrimSpace(rootAgentName)
-
-	if persisted != "" {
-		persistedErr := validate(persisted)
-		if persistedErr == nil {
-			return persisted, false, "", nil
-		}
-
-		if !allowRootProviderFallback {
-			return "", false, "", fmt.Errorf("persisted agent %q is unavailable: %w", persisted, persistedErr)
-		}
-		if root == "" {
-			return "", false, "", fmt.Errorf("persisted agent %q is unavailable: %w; relay root provider is not configured", persisted, persistedErr)
-		}
-		if rootErr := validate(root); rootErr != nil {
-			return "", false, "", fmt.Errorf("persisted agent %q is unavailable: %w; relay root provider %q is unavailable: %w", persisted, persistedErr, root, rootErr)
-		}
-		return root, true, "persisted_agent_unavailable", nil
-	}
-
-	if !allowRootProviderFallback {
-		return "", false, "", fmt.Errorf("persisted session agent is empty")
-	}
-	if root == "" {
-		return "", false, "", fmt.Errorf("persisted session agent is empty and relay root provider is not configured")
-	}
-	if rootErr := validate(root); rootErr != nil {
-		return "", false, "", fmt.Errorf("persisted session agent is empty and relay root provider %q is unavailable: %w", root, rootErr)
-	}
-	return root, true, "persisted_agent_missing", nil
 }
 
 func (m *Manager) getProviderName() string {

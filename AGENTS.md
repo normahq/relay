@@ -28,15 +28,15 @@ go tool golangci-lint run
 - Keep Relay startup order strict: config load -> bundled MCP lifecycle -> root provider -> channel runtime.
 - Keep channel/session boundaries stable (`chat_id`, `topic_id`) and preserve lazy restore semantics.
 - Keep workspace mode behavior stable (`on|off|auto`) with safe defaults and explicit failures.
-- Keep Relay MCP/server contracts backward compatible (`relay.agents.*`, `relay.workspace.*`, and alias tools).
+- Keep Relay MCP/server contracts backward compatible (`relay.workspace.*` and alias tools).
 - Keep config loading via app-specific `.config/relay/config.yaml` with `RELAY_*` env overrides.
 
 ## Bot Commands (Current Contract)
 
 - `/start <owner_token>`: direct message only; owner authentication/bootstrap entrypoint, also used for invite-token collaborator onboarding.
-- `/new [provider_id]`: owner only, direct message only; creates a topic session for the selected provider or defaults to `relay.provider`.
-- `/close`: owner only, direct message only; closes a topic session or stops the root session.
-- `/cancel`: owner only; cancels in-flight turn processing for the current session and drops queued turns.
+- `/topic <name>`: owner/collaborator, direct message only; creates a topic session labeled `<name>` using the configured root provider.
+- `/close`: owner/collaborator, direct message only; closes a topic session or stops the root session.
+- `/cancel`: owner/collaborator; cancels in-flight turn processing for the current session and drops queued turns.
 - `/user add|list|remove <user_id>`: owner only; collaborator invite and management commands.
 - Keep command behavior and access expectations backward compatible; when changing commands, update `README.md` and `docs/relay.md` as part of the same change.
 

@@ -195,50 +195,29 @@ Per model turn:
 2. Final assistant text is sent with `sendMessage` using MarkdownV2.
 3. If MarkdownV2 delivery fails, relay retries once without `parse_mode`.
 
-## Subagent Spawn
+## Topic Sessions
 
-Two v1 spawn paths are supported:
+Relay runs with a single provider per process (`relay.provider`).
 
-1. Manual: `/new [provider_id]`
-2. Agent/tool path: relay MCP `relay.agents.start`
-
-Both paths create:
-
-- A new Telegram forum topic
-- A topic-bound ADK session
-- A dedicated Git worktree when `relay.workspace.mode` resolves to enabled
+- The provider is initialized before message handling.
+- The root relay session (`topic_id=0`) is bootstrapped for the owner chat during activation.
+- Every chat/topic pair maps to its own ADK session, but all sessions in that relay instance use the same provider runtime.
 
 ### Manual session control
 
-**Note:** `/new` and `/close` commands are only available in direct messages (DM), not group chats.
+- `/topic <name>` (DM only, owner/collaborator): creates a new Telegram topic and a topic-bound session.
+  - `<name>` is required.
+  - `<name>` is a session label, not a provider selector.
+- `/close` (DM only, owner/collaborator): closes current topic session, or stops root session in main chat (`topic_id=0`).
+- `/cancel` (owner/collaborator): cancels active turn and drops queued turns for current session.
 
-- `/new [provider_id]` creates a new topic-bound subagent session (DM only), defaulting to `relay.provider` when omitted.
-  - **Backend Note:** Subagent sessions always use the current `relay.provider` for execution. The provided `provider_id` (or agent name) serves as a label for the session but does not select the backend provider.
-- `/close` closes the current topic (when `message_thread_id > 0`) and stops the current agent session (DM only).
-- In the main chat (`topic_id = 0`), `/close` only stops the root session (topic is not closed).
+### Topic restore/create behavior
 
-## Relay MCP API (V1)
-
-- built-in server ID: `relay`
-- `relay.agents.start`
-  - required input: `agent_name`, `locator`
-  - `locator` must include `locator.channel_type` plus `locator.address`
-  - Telegram locator example: `{"channel_type":"telegram","address":{"chat_id":123456}}`
-  - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`
-  - caller scope enforcement: start target `chat_id` must match caller session chat
-  - output: structured session object including `channel_type`, `address_key`, `session_id`, `chat_id`, `topic_id`, `agent_name`, `description`, `mcp_servers`
-  - **Backend Note:** The `agent_name` serves as a label for the session. Execution always uses the current `relay.provider` configured for the relay instance.
-- `relay.agents.stop`
-  - input: `session_id`
-  - mutating tools require caller session identity via `X-Norma-Relay-Caller-Session-ID`
-  - actor scope: caller may mutate only sessions owned by the same session user
-  - legacy sessions with unknown owner can be mutated only by relay owner
-- `relay.agents.list`
-  - output: structured `agents[]` entries, including persisted sessions with `status=persisted`
-- `relay.agents.get`
-  - input: `session_id`
-  - output: structured `agent` object
-- Deprecated aliases (still supported): `relay.agents.stop_agent`, `relay.agents.list_agents`, `relay.agents.get_agent`
+- Relay restores persisted topic metadata on first message after restart.
+- Persisted session label is reused as-is for restore; if missing, relay falls back to label `auto`.
+- If no persisted topic metadata exists, relay creates a new topic session using label `auto`.
+- Welcome message uses compact KV format:
+  - `name=<label> session=<session_id> type=<provider_type> model=<model> mcp=<server1,server2>`
 
 ## Workspace MCP Usage
 
@@ -251,14 +230,14 @@ Both paths create:
 
 ## Acceptance/Verification Scenarios
 
-1. Startup order enforces internal MCP -> relay agent -> bot runtime.
+1. Startup order enforces internal MCP -> root provider -> bot runtime.
 2. Polling mode starts by default when `relay.telegram.webhook.enabled=false`.
 3. Webhook mode (`relay.telegram.webhook.enabled=true`) fails fast without `relay.telegram.webhook.url`.
 4. `/start <token>` registers owner once; non-owner traffic is rejected.
-5. `/new [provider_id]` creates topic + relay session and persists session metadata.
-6. Relay MCP `start` creates topic + session and returns IDs.
+5. `/topic <name>` creates topic + relay session and persists session metadata.
+6. `/topic` without name returns usage error.
 7. Restart clears in-memory sessions but topic sessions are lazy-restored from persisted metadata.
 8. Polling mode resumes from persisted Telegram offset in relay state DB.
 9. Partial thought updates are sent with Telegram Bot API `sendMessageDraft`.
 10. Final assistant response is sent with `sendMessage` using MarkdownV2 with fallback retry without `parse_mode`.
-13. `/close` in a topic closes that topic and stops the session; `/close` in root chat stops only root session.
+11. `/close` in a topic closes that topic and stops the session; `/close` in root chat stops only root session.
