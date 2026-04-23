@@ -155,11 +155,14 @@ func (m *Manager) GetAgentInfo(agentName string) (string, []string) {
 func (m *Manager) GetAgentMetadata(agentName string) AgentMetadata {
 	m.mu.RLock()
 	builder := m.agentBuilder
+	relayMCPServerIDs := append([]string(nil), m.relayMCPServerIDs...)
 	m.mu.RUnlock()
 	if builder == nil {
 		return AgentMetadata{}
 	}
-	return builder.GetAgentMetadata(agentName)
+	meta := builder.GetAgentMetadata(agentName)
+	meta.MCPServers = mergeUniqueStringIDs(meta.MCPServers, relayMCPServerIDs)
+	return meta
 }
 
 // ProviderIDs returns configured runtime provider IDs sorted lexicographically.
