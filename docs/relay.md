@@ -120,6 +120,79 @@ profiles:
       provider: <provider_id>
 ```
 
+### MCP Server Configuration
+
+MCP servers are configured in `runtime.mcp_servers` and referenced by providers via `runtime.providers.<id>.mcp_servers`.
+
+#### Transport Types
+
+| Type | Description |
+|------|-------------|
+| `stdio` | Process-based stdio communication (recommended for local tools) |
+| `http` | HTTP transport with SSE streaming |
+| `sse` | Server-Sent Events transport |
+
+#### Stdio MCP Server Example
+
+```yaml
+runtime:
+  mcp_servers:
+    # Local Python tool server
+    python-tools:
+      type: stdio
+      cmd: ["uv", "run", "mcp", "run", "path/to/server.py"]
+      env:
+        API_KEY: "${PYTHON_TOOLS_API_KEY}"
+      working_dir: /path/to/project
+
+    # Node.js based MCP server
+    node-tools:
+      type: stdio
+      cmd: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      env:
+        DEBUG: "true"
+```
+
+#### HTTP MCP Server Example
+
+```yaml
+runtime:
+  mcp_servers:
+    remote-mcp:
+      type: http
+      url: https://mcp.example.com/mcp
+      headers:
+        Authorization: "Bearer ${MCP_TOKEN}"
+```
+
+#### Using MCP Servers in Providers
+
+```yaml
+runtime:
+  mcp_servers:
+    python-tools:
+      type: stdio
+      cmd: ["uv", "run", "mcp", "run", "server.py"]
+
+  providers:
+    codex:
+      type: codex_acp
+      mcp_servers:
+        - python-tools
+
+relay:
+  provider: codex
+  mcp_servers: []  # extra servers added to all sessions
+```
+
+#### Bundled Relay MCP Server
+
+The relay MCP server (`relay`) is automatically included in all sessions when workspace mode is enabled. It provides:
+
+- `relay.state` - persistent key-value storage
+- `relay.workspace.import` - import workspace from base branch
+- `relay.workspace.export` - export workspace to base branch
+
 ### Telegram settings
 
 - `relay.telegram.token`: bot token (required)
