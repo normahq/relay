@@ -80,6 +80,10 @@ func (m *Messenger) SendPlain(ctx context.Context, chatID int64, text string, to
 
 // SendMarkdown converts standard Markdown to Telegram MarkdownV2 and sends.
 func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string, topicID int) error {
+	return m.sendMarkdown(ctx, chatID, text, topicID)
+}
+
+func (m *Messenger) sendMarkdown(ctx context.Context, chatID int64, text string, topicID int) error {
 	payload, err := telegramfmt.MarkdownV2(text)
 	if err != nil {
 		m.logger.Warn().Err(err).Msg("failed to convert markdown to telegram format, falling back to escaped literal")
@@ -96,7 +100,12 @@ func (m *Messenger) SendAgentReply(ctx context.Context, chatID int64, text strin
 	case telegramfmt.ModeNone:
 		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeNone), "send message without parse_mode")
 	default:
-		return m.SendMarkdown(ctx, chatID, text, topicID)
+		for _, chunk := range telegramfmt.SplitMarkdownMessageChunks(text) {
+			if err := m.sendMarkdown(ctx, chatID, chunk, topicID); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 }
 

@@ -17,12 +17,48 @@ func MarkdownV2(text string) (string, error) {
 	})
 }
 
+// SplitMarkdownMessageChunks splits agent Markdown on standalone thematic-break separators.
+func SplitMarkdownMessageChunks(text string) []string {
+	lines := strings.SplitAfter(text, "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+
+	var chunks []string
+	var current strings.Builder
+	inFence := false
+	for _, line := range lines {
+		lineWithoutBreak := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if isMarkdownFenceLine(lineWithoutBreak) {
+			inFence = !inFence
+			current.WriteString(line)
+			continue
+		}
+		if !inFence && strings.TrimSpace(lineWithoutBreak) == "---" {
+			appendMarkdownChunk(&chunks, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteString(line)
+	}
+	appendMarkdownChunk(&chunks, current.String())
+	return chunks
+}
+
 func markdownV2WithConverter(text string, convert func(source []byte, writer io.Writer) error) (string, error) {
 	var buf bytes.Buffer
 	if err := convert([]byte(text), &buf); err != nil {
 		return "", fmt.Errorf("converting markdown to Telegram MarkdownV2: %w", err)
 	}
 	return cleanMarkdownV2Payload(buf.String()), nil
+}
+
+func appendMarkdownChunk(chunks *[]string, chunk string) {
+	chunk = strings.Trim(chunk, "\r\n")
+	if strings.TrimSpace(chunk) == "" {
+		return
+	}
+	*chunks = append(*chunks, chunk)
 }
 
 // EscapeMarkdownV2 escapes a literal string for Telegram MarkdownV2.

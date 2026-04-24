@@ -97,6 +97,67 @@ func TestMarkdownV2PreservesParagraphAndCodeStructure(t *testing.T) {
 	}
 }
 
+func TestSplitMarkdownMessageChunks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "splits on standalone separator",
+			in:   "first\n\n---\n\nsecond",
+			want: []string{"first", "second"},
+		},
+		{
+			name: "allows separator whitespace",
+			in:   "first\r\n  ---  \r\nsecond",
+			want: []string{"first", "second"},
+		},
+		{
+			name: "does not split inline dashes",
+			in:   "first --- second",
+			want: []string{"first --- second"},
+		},
+		{
+			name: "does not split inside backtick fence",
+			in:   "before\n```txt\n---\n```\nafter",
+			want: []string{"before\n```txt\n---\n```\nafter"},
+		},
+		{
+			name: "does not split inside tilde fence",
+			in:   "before\n~~~txt\n---\n~~~\nafter",
+			want: []string{"before\n~~~txt\n---\n~~~\nafter"},
+		},
+		{
+			name: "drops empty chunks",
+			in:   "---\nfirst\n---\n\n---\nsecond\n---",
+			want: []string{"first", "second"},
+		},
+		{
+			name: "empty input returns no chunks",
+			in:   "",
+			want: nil,
+		},
+		{
+			name: "separator only returns no chunks",
+			in:   "\n---\n",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := SplitMarkdownMessageChunks(tt.in)
+			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
+				t.Fatalf("SplitMarkdownMessageChunks() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarkdownV2ReturnsConverterError(t *testing.T) {
 	t.Parallel()
 

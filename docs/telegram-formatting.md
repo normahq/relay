@@ -33,6 +33,7 @@ Relay behavior:
 - Trims converter-added leading and trailing newlines.
 - Normalizes converter list indentation.
 - Preserves fenced code block content.
+- Splits final agent replies into multiple Telegram messages on standalone `---` separator lines outside fenced code blocks.
 - Tolerates common accidental pre-escaped punctuation, but agents should not rely on this.
 
 Not supported or not recommended:
@@ -41,6 +42,7 @@ Not supported or not recommended:
 - Do not pre-escape Telegram MarkdownV2 reserved characters in agent instructions.
 - Do not rely on exact rendered bullet glyphs; Relay may normalize list markers for Telegram.
 - Do not rely on raw Telegram entity syntax in Markdown mode.
+- Do not use `---` as prose decoration on its own line unless a message split is intended.
 
 Example model output:
 
@@ -53,6 +55,16 @@ Example model output:
 ```bash
 go test ./...
 ```
+~~~
+
+Message split example:
+
+~~~markdown
+First Telegram message.
+
+---
+
+Second Telegram message.
 ~~~
 
 ## HTML Mode

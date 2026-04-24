@@ -32,6 +32,19 @@ type sendMessageResult struct {
 	err  error
 }
 
+func successfulSendMessageResponse(messageID int) *client.SendMessageResponse {
+	return &client.SendMessageResponse{
+		HTTPResponse: &http.Response{StatusCode: http.StatusOK, Status: "200 OK"},
+		JSON200: &struct {
+			Ok     client.SendMessage200Ok `json:"ok"`
+			Result client.Message          `json:"result"`
+		}{
+			Ok:     true,
+			Result: client.Message{MessageId: messageID},
+		},
+	}
+}
+
 func (f *fakeChatActionClient) SendChatActionWithResponse(
 	_ context.Context,
 	body client.SendChatActionJSONRequestBody,
@@ -66,16 +79,7 @@ func (f *fakeChatActionClient) SendMessageWithResponse(
 		f.sendMessageResults = f.sendMessageResults[1:]
 		return result.resp, result.err
 	}
-	return &client.SendMessageResponse{
-		HTTPResponse: &http.Response{StatusCode: http.StatusOK, Status: "200 OK"},
-		JSON200: &struct {
-			Ok     client.SendMessage200Ok `json:"ok"`
-			Result client.Message          `json:"result"`
-		}{
-			Ok:     true,
-			Result: client.Message{MessageId: len(f.messages)},
-		},
-	}, nil
+	return successfulSendMessageResponse(len(f.messages)), nil
 }
 
 func TestSendChatAction_IncludesMessageThreadIDWhenTopicProvided(t *testing.T) {
@@ -164,6 +168,24 @@ func TestSendChatAction_ReturnsTelegramErrorResponse(t *testing.T) {
 	}
 }
 
+func TestSendMarkdown_DoesNotSplitStandaloneSeparator(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+
+	if err := m.SendMarkdown(context.Background(), 9001, "first\n---\nsecond", 77); err != nil {
+		t.Fatalf("SendMarkdown() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "first") || !strings.Contains(tgClient.messages[0].Text, "second") {
+		t.Fatalf("message text = %q, want both sections in one message", tgClient.messages[0].Text)
+	}
+}
+
 func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +254,127 @@ func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 				t.Fatalf("message text = %q, want %q", tgClient.messages[0].Text, tt.wantText)
 			}
 		})
+	}
+}
+
+func TestSendAgentReply_MarkdownV2SplitsOnStandaloneSeparator(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	input := "**first**\n\n---\n\nsecond with `code`"
+	if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 2 {
+		t.Fatalf("messages calls = %d, want 2", len(tgClient.messages))
+	}
+	for i, msg := range tgClient.messages {
+		if msg.ChatId != 9001 {
+			t.Fatalf("message[%d].chat_id = %d, want 9001", i, msg.ChatId)
+		}
+		if msg.MessageThreadId == nil || *msg.MessageThreadId != 77 {
+			t.Fatalf("message[%d].message_thread_id = %v, want 77", i, msg.MessageThreadId)
+		}
+		if msg.ParseMode == nil || *msg.ParseMode != "MarkdownV2" {
+			t.Fatalf("message[%d].parse_mode = %v, want MarkdownV2", i, msg.ParseMode)
+		}
+	}
+	if tgClient.messages[0].Text != "***first***" {
+		t.Fatalf("first message text = %q, want converted first chunk", tgClient.messages[0].Text)
+	}
+	if tgClient.messages[1].Text != "second with `code`" {
+		t.Fatalf("second message text = %q, want converted second chunk", tgClient.messages[1].Text)
+	}
+}
+
+func TestSendAgentReply_MarkdownV2DoesNotSplitInsideFencedCode(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	input := "before\n\n```txt\n---\n```\n\nafter"
+	if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "```txt\n---\n```") {
+		t.Fatalf("message text = %q, want fenced separator preserved", tgClient.messages[0].Text)
+	}
+}
+
+func TestSendAgentReply_DoesNotSplitHTMLOrNoneModes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode string
+	}{
+		{name: "html", mode: telegramfmt.ModeHTML},
+		{name: "none", mode: telegramfmt.ModeNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tgClient := &fakeChatActionClient{}
+			m := NewMessenger(tgClient, zerolog.Nop())
+			m.SetAgentReplyFormattingMode(tt.mode)
+
+			input := "first\n---\nsecond"
+			if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
+				t.Fatalf("SendAgentReply() error = %v", err)
+			}
+			if len(tgClient.messages) != 1 {
+				t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+			}
+			if tgClient.messages[0].Text != input {
+				t.Fatalf("message text = %q, want unsplit input", tgClient.messages[0].Text)
+			}
+		})
+	}
+}
+
+func TestSendAgentReply_MarkdownV2ReturnsErrorFromLaterSplitChunk(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{
+		sendMessageResults: []sendMessageResult{
+			{resp: successfulSendMessageResponse(1)},
+			{err: errors.New("network timeout")},
+			{err: errors.New("network timeout")},
+		},
+	}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	err := m.SendAgentReply(context.Background(), 9001, "first\n---\nsecond", 77)
+	if err == nil {
+		t.Fatal("SendAgentReply() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "network timeout") {
+		t.Fatalf("SendAgentReply() error = %v, want network timeout", err)
+	}
+	if len(tgClient.messages) != 3 {
+		t.Fatalf("messages calls = %d, want second chunk retry after transport error", len(tgClient.messages))
+	}
+	if tgClient.messages[0].Text != "first" || tgClient.messages[1].Text != "second" || tgClient.messages[2].Text != "second" {
+		t.Fatalf("message texts = %#v, want first then second retry", []string{
+			tgClient.messages[0].Text,
+			tgClient.messages[1].Text,
+			tgClient.messages[2].Text,
+		})
+	}
+	if tgClient.messages[2].ParseMode != nil {
+		t.Fatalf("retry parse_mode = %v, want nil", *tgClient.messages[2].ParseMode)
 	}
 }
 

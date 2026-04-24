@@ -16,6 +16,7 @@ func TestTelegramFormattingDocsCoverFormatterContract(t *testing.T) {
 		"`none`",
 		"agent output is normal Markdown or plain text",
 		"Relay converts it to Telegram MarkdownV2",
+		"Splits final agent replies into multiple Telegram messages on standalone `---` separator lines outside fenced code blocks.",
 		"Do not pre-escape Telegram MarkdownV2 reserved characters",
 		"Relay escapes unsafe raw text while preserving supported Telegram HTML tags",
 		`<blockquote expandable>`,
