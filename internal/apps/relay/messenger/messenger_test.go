@@ -168,30 +168,38 @@ func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		mode      string
-		wantParse *string
+		name     string
+		mode     string
+		input    string
+		wantText string
+		wantMode *string
 	}{
 		{
-			name: "markdownv2",
-			mode: telegramfmt.ModeMarkdownV2,
-			wantParse: func() *string {
+			name:     "markdownv2 converts normal markdown",
+			mode:     telegramfmt.ModeMarkdownV2,
+			input:    "**final answer** with `code`",
+			wantText: "***final answer*** with `code`",
+			wantMode: func() *string {
 				v := "MarkdownV2"
 				return &v
 			}(),
 		},
 		{
-			name: "html",
-			mode: telegramfmt.ModeHTML,
-			wantParse: func() *string {
+			name:     "html passes telegram html through",
+			mode:     telegramfmt.ModeHTML,
+			input:    "<b>final answer</b> with <code>code</code>",
+			wantText: "<b>final answer</b> with <code>code</code>",
+			wantMode: func() *string {
 				v := testParseModeHTML
 				return &v
 			}(),
 		},
 		{
-			name:      "none",
-			mode:      telegramfmt.ModeNone,
-			wantParse: nil,
+			name:     "none sends raw text without parse mode",
+			mode:     telegramfmt.ModeNone,
+			input:    "**final answer** with <code>code</code>",
+			wantText: "**final answer** with <code>code</code>",
+			wantMode: nil,
 		},
 	}
 
@@ -203,7 +211,7 @@ func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 			m := NewMessenger(tgClient, zerolog.Nop())
 			m.SetAgentReplyFormattingMode(tt.mode)
 
-			if err := m.SendAgentReply(context.Background(), 9001, "**final answer**", 77); err != nil {
+			if err := m.SendAgentReply(context.Background(), 9001, tt.input, 77); err != nil {
 				t.Fatalf("SendAgentReply() error = %v", err)
 			}
 
@@ -212,13 +220,16 @@ func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 			}
 			got := tgClient.messages[0].ParseMode
 			switch {
-			case tt.wantParse == nil && got != nil:
+			case tt.wantMode == nil && got != nil:
 				t.Fatalf("parse_mode = %v, want nil", *got)
-			case tt.wantParse != nil && (got == nil || *got != *tt.wantParse):
+			case tt.wantMode != nil && (got == nil || *got != *tt.wantMode):
 				if got == nil {
-					t.Fatalf("parse_mode = nil, want %q", *tt.wantParse)
+					t.Fatalf("parse_mode = nil, want %q", *tt.wantMode)
 				}
-				t.Fatalf("parse_mode = %q, want %q", *got, *tt.wantParse)
+				t.Fatalf("parse_mode = %q, want %q", *got, *tt.wantMode)
+			}
+			if tgClient.messages[0].Text != tt.wantText {
+				t.Fatalf("message text = %q, want %q", tgClient.messages[0].Text, tt.wantText)
 			}
 		})
 	}

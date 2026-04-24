@@ -87,34 +87,57 @@ func TestPromptRuleAndExample(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mode        string
-		wantRule    string
-		wantExample string
+		name          string
+		mode          string
+		wantRuleParts []string
+		denyRuleParts []string
+		wantExample   string
 	}{
 		{
-			name:        "markdownv2",
-			mode:        ModeMarkdownV2,
-			wantRule:    "Relay converts it to Telegram MarkdownV2",
+			name: "markdownv2",
+			mode: ModeMarkdownV2,
+			wantRuleParts: []string{
+				"Write normal Markdown or plain text",
+				"Relay converts it to Telegram MarkdownV2",
+				"do not pre-escape Telegram MarkdownV2 reserved characters",
+			},
+			denyRuleParts: []string{
+				"Use Telegram HTML parse mode",
+				"Escape raw <, >, & as entities",
+			},
 			wantExample: "**Build:** success. Run `relay start`.",
 		},
 		{
-			name:        "html",
-			mode:        ModeHTML,
-			wantRule:    "Use Telegram HTML parse mode",
+			name: "html",
+			mode: ModeHTML,
+			wantRuleParts: []string{
+				"Use Telegram HTML parse mode",
+				"Supported tags: b/strong, i/em, u/ins, s/strike/del",
+				"Escape raw <, >, & as entities",
+			},
+			denyRuleParts: []string{
+				"Relay converts it to Telegram MarkdownV2",
+				"do not pre-escape Telegram MarkdownV2 reserved characters",
+			},
 			wantExample: "<b>Build:</b> success. Run <code>relay start</code>.",
 		},
 		{
-			name:        "none",
-			mode:        ModeNone,
-			wantRule:    "Use plain text only",
-			wantExample: "Build: success. Run relay start.",
+			name:          "none",
+			mode:          ModeNone,
+			wantRuleParts: []string{"Use plain text only", "Do not use Markdown or HTML markup"},
+			denyRuleParts: []string{"Telegram MarkdownV2", "Telegram HTML parse mode"},
+			wantExample:   "Build: success. Run relay start.",
 		},
 		{
-			name:        "unknown defaults to markdownv2",
-			mode:        "md",
-			wantRule:    "Relay converts it to Telegram MarkdownV2",
-			wantExample: "**Build:** success. Run `relay start`.",
+			name: "unknown defaults to markdownv2",
+			mode: "md",
+			wantRuleParts: []string{
+				"Write normal Markdown or plain text",
+				"Relay converts it to Telegram MarkdownV2",
+				"do not pre-escape Telegram MarkdownV2 reserved characters",
+			},
+			denyRuleParts: []string{"Use Telegram HTML parse mode"},
+			wantExample:   "**Build:** success. Run `relay start`.",
 		},
 	}
 
@@ -122,11 +145,15 @@ func TestPromptRuleAndExample(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			gotRule, gotExample := PromptRuleAndExample(tt.mode)
-			if !strings.Contains(gotRule, tt.wantRule) {
-				t.Fatalf("PromptRuleAndExample(%q) rule = %q, want to contain %q", tt.mode, gotRule, tt.wantRule)
+			for _, want := range tt.wantRuleParts {
+				if !strings.Contains(gotRule, want) {
+					t.Fatalf("PromptRuleAndExample(%q) rule = %q, want to contain %q", tt.mode, gotRule, want)
+				}
 			}
-			if tt.mode == ModeMarkdownV2 && !strings.Contains(gotRule, "do not pre-escape Telegram MarkdownV2 reserved characters") {
-				t.Fatalf("PromptRuleAndExample(%q) rule = %q, want normal Markdown contract", tt.mode, gotRule)
+			for _, denied := range tt.denyRuleParts {
+				if strings.Contains(gotRule, denied) {
+					t.Fatalf("PromptRuleAndExample(%q) rule = %q, should not contain %q", tt.mode, gotRule, denied)
+				}
 			}
 			if gotExample != tt.wantExample {
 				t.Fatalf("PromptRuleAndExample(%q) example = %q, want %q", tt.mode, gotExample, tt.wantExample)
