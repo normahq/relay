@@ -209,8 +209,8 @@ func TestBuildRelayInstruction_IncludesFormattingGuidance_DefaultMarkdownV2(t *t
 
 	wantSnippets := []string{
 		"Telegram formatting mode: `markdownv2`.",
-		"Use Telegram MarkdownV2 parse mode. Escape these reserved characters with backslash when needed: _ * [ ] ( ) ~ ` > # + - = | { } . !",
-		"Example output: *Build:* success. Run `relay start`.",
+		"Write normal Markdown or plain text. Relay converts it to Telegram MarkdownV2 and preserves natural line breaks; do not pre-escape Telegram MarkdownV2 reserved characters.",
+		"Example output: **Build:** success. Run `relay start`.",
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(got, snippet) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
@@ -248,5 +249,85 @@ func TestSendAgentReply_RetriesWithoutParseModeOnTransportError(t *testing.T) {
 	}
 	if tgClient.messages[1].ParseMode != nil {
 		t.Fatalf("second parse_mode = %v, want nil", *tgClient.messages[1].ParseMode)
+	}
+}
+
+func TestSendAgentReply_MarkdownV2PreservesSoftLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	if err := m.SendAgentReply(context.Background(), 9001, "Hey there\nWhat do you want to work on?", 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "Hey there\nWhat do you want to work on?") {
+		t.Fatalf("message text = %q, want preserved line break", tgClient.messages[0].Text)
+	}
+}
+
+func TestSendAgentReply_MarkdownV2PreservesExistingHardLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	if err := m.SendAgentReply(context.Background(), 9001, "Hey there  \nWhat do you want to work on?", 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "Hey there\nWhat do you want to work on?") {
+		t.Fatalf("message text = %q, want preserved line break", tgClient.messages[0].Text)
+	}
+}
+
+func TestSendAgentReply_MarkdownV2PreservesBlankLines(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	if err := m.SendAgentReply(context.Background(), 9001, "First paragraph\n\nSecond paragraph", 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "First paragraph\n\nSecond paragraph") {
+		t.Fatalf("message text = %q, want preserved blank line", tgClient.messages[0].Text)
+	}
+}
+
+func TestSendAgentReply_MarkdownV2DoesNotRewriteFencedCodeLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	input := "```txt\none\ntwo\n```"
+	if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	if strings.Contains(tgClient.messages[0].Text, "one  \n") || strings.Contains(tgClient.messages[0].Text, "two  \n") {
+		t.Fatalf("message text = %q, code block line breaks were rewritten", tgClient.messages[0].Text)
+	}
+	if !strings.Contains(tgClient.messages[0].Text, "one\ntwo\n") {
+		t.Fatalf("message text = %q, want original code block line breaks", tgClient.messages[0].Text)
 	}
 }

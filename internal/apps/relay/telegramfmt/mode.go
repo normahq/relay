@@ -59,6 +59,6 @@ func PromptRuleAndExample(mode string) (rule string, example string) {
 	case ModeNone:
 		return "Use plain text only. Do not use Markdown or HTML markup.", "Build: success. Run relay start."
 	default:
-		return "Use Telegram MarkdownV2 parse mode. Escape these reserved characters with backslash when needed: _ * [ ] ( ) ~ ` > # + - = | { } . !", "*Build:* success. Run `relay start`."
+		return "Write normal Markdown or plain text. Relay converts it to Telegram MarkdownV2 and preserves natural line breaks; do not pre-escape Telegram MarkdownV2 reserved characters.", "**Build:** success. Run `relay start`."
 	}
 }

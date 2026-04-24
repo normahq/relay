@@ -205,7 +205,8 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
 - `relay.telegram.formatting_mode`: final assistant response format mode.
   - allowed values: `markdownv2`, `html`, `none`
   - default: `markdownv2`
-  - formatting syntax follows Telegram Bot API formatting options: <https://core.telegram.org/bots/api#formatting-options>
+  - `markdownv2` accepts normal Markdown/plain text from the model and converts it to Telegram MarkdownV2
+  - `html` expects Telegram HTML syntax from the model
   - `none` omits Telegram `parse_mode`
   - invalid values fail startup
 - `relay.telegram.webhook.enabled`: enable local HTTP webhook endpoint (`true` => webhook mode, `false` => polling mode; default: `false`)
@@ -275,9 +276,9 @@ Per model turn:
 
 1. Non-terminal ADK events send `sendChatAction` with `typing` for the same chat/topic; DM chats also emit plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
 2. Final assistant text is sent with `sendMessage` using `relay.telegram.formatting_mode`:
-   - `markdownv2`: convert Markdown to Telegram MarkdownV2 and send with `parse_mode=MarkdownV2`.
-   - `html`: send text with `parse_mode=HTML`.
-   - `none`: send text without `parse_mode`.
+   - `markdownv2`: model writes Markdown/plain text; Relay converts it to Telegram MarkdownV2, preserves line breaks, and sends with `parse_mode=MarkdownV2`.
+   - `html`: model writes Telegram HTML; Relay sends text with `parse_mode=HTML`.
+   - `none`: Relay sends text without `parse_mode`.
 3. If send fails at transport level, or Telegram returns parse/escaping API errors (for example `can't parse entities`), relay retries once without `parse_mode`.
 
 ## Topic Sessions
