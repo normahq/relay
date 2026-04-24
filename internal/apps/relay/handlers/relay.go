@@ -32,8 +32,8 @@ type relayAuthorizer struct {
 }
 
 const (
-	rootSessionLabel = "relay"
-	autoSessionLabel = "auto"
+	ownerSessionLabel = "relay"
+	autoSessionLabel  = "auto"
 )
 
 func (a *relayAuthorizer) IsOwner(userID int64) bool {
@@ -146,13 +146,13 @@ func (h *RelayHandler) SendToOwner(ctx context.Context, msg string) error {
 	return nil
 }
 
-// ActivateOwner binds owner/chat for relay traffic and bootstraps the root session.
+// ActivateOwner binds owner/chat for relay traffic and bootstraps the owner session.
 func (h *RelayHandler) ActivateOwner(ctx context.Context, ownerID, chatID int64) error {
 	h.SetOwner(ownerID, chatID)
-	return h.bootstrapRootSession(ctx, ownerID, chatID)
+	return h.bootstrapOwnerSession(ctx, ownerID, chatID)
 }
 
-func (h *RelayHandler) bootstrapRootSession(ctx context.Context, ownerID, chatID int64) error {
+func (h *RelayHandler) bootstrapOwnerSession(ctx context.Context, ownerID, chatID int64) error {
 	relayProviderName := h.getProviderName()
 	if relayProviderName == "" {
 		return fmt.Errorf("relay provider is not configured")
@@ -164,20 +164,20 @@ func (h *RelayHandler) bootstrapRootSession(ctx context.Context, ownerID, chatID
 	ts, err := h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
 		Locator: locator,
 		UserID:  transportUserID,
-	}, rootSessionLabel)
+	}, ownerSessionLabel)
 	if err != nil {
-		return fmt.Errorf("create root session: %w", err)
+		return fmt.Errorf("create owner session: %w", err)
 	}
 
 	metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
-	welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
+	welcomeMsg := BuildAgentWelcomeMessage(ownerSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 	_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 
 	h.logger.Info().
 		Int64("owner_id", ownerID).
 		Int64("chat_id", chatID).
 		Str("agent", relayProviderName).
-		Msg("root session bootstrapped")
+		Msg("owner session bootstrapped")
 	return nil
 }
 
@@ -234,41 +234,27 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 	var ts *relaysession.TopicSession
 	var err error
 
-	if topicID == 0 {
-		if !messageCtx.IsDM {
-			ts, err = h.sessionManager.GetSession(locator)
-			if err != nil {
-				return nil
-			}
-		} else {
-			existingSession, _ := h.sessionManager.GetSession(locator)
-			sendRootWelcome := existingSession == nil
-			if existingSession == nil {
-				relayProviderName := h.getProviderName()
-				if relayProviderName == "" {
-					_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
-					return nil
-				}
-			}
-			relayProviderName := h.getProviderName()
-			if relayProviderName == "" {
-				_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
-				return nil
-			}
-			ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
-				Locator: locator,
-				UserID:  transportUserID,
-			}, rootSessionLabel)
-			if err != nil {
-				log.Error().Err(err).Str("agent", relayProviderName).Msg("failed to ensure root session")
-				_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start root session: %v.\n\nPlease close this chat and start again.", err))
-				return nil
-			}
-			if sendRootWelcome {
-				metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
-				welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
-				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
-			}
+	if messageCtx.IsDM && topicID == 0 {
+		existingSession, _ := h.sessionManager.GetSession(locator)
+		sendOwnerWelcome := existingSession == nil
+		relayProviderName := h.getProviderName()
+		if relayProviderName == "" {
+			_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
+			return nil
+		}
+		ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
+			Locator: locator,
+			UserID:  transportUserID,
+		}, ownerSessionLabel)
+		if err != nil {
+			log.Error().Err(err).Str("agent", relayProviderName).Msg("failed to ensure owner session")
+			_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start owner session: %v.\n\nPlease close this chat and start again.", err))
+			return nil
+		}
+		if sendOwnerWelcome {
+			metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
+			welcomeMsg := BuildAgentWelcomeMessage(ownerSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
+			_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 		}
 	} else {
 		ts, err = h.sessionManager.GetSession(locator)
@@ -291,12 +277,12 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 						UserID:  transportUserID,
 					}, autoSessionLabel)
 					if err != nil {
-						log.Error().Err(err).Str("agent", relayProviderName).Int("topic_id", topicID).Msg("failed to create topic session")
-						_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start topic session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
+						log.Error().Err(err).Str("agent", relayProviderName).Int("topic_id", topicID).Msg("failed to create session")
+						_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
 						return nil
 					}
 				} else {
-					log.Warn().Err(err).Int("topic_id", topicID).Msg("failed to restore topic session")
+					log.Warn().Err(err).Int("topic_id", topicID).Msg("failed to restore session")
 					_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to restore this session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
 					return nil
 				}
@@ -746,10 +732,10 @@ func (h *RelayHandler) onStart(ctx context.Context) error {
 
 	h.SetOwner(owner.UserID, owner.ChatID)
 
-	if err := h.bootstrapRootSession(ctx, owner.UserID, owner.ChatID); err != nil {
-		h.logger.Error().Err(err).Int64("owner_id", owner.UserID).Msg("failed to bootstrap root session during startup")
-		if sendErr := h.messenger.SendPlain(ctx, owner.UserID, fmt.Sprintf("Failed to start root session: %v.\nPlease check relay configuration.", err), 0); sendErr != nil {
-			h.logger.Warn().Err(sendErr).Msg("failed to send root session failure message")
+	if err := h.bootstrapOwnerSession(ctx, owner.UserID, owner.ChatID); err != nil {
+		h.logger.Error().Err(err).Int64("owner_id", owner.UserID).Msg("failed to bootstrap owner session during startup")
+		if sendErr := h.messenger.SendPlain(ctx, owner.UserID, fmt.Sprintf("Failed to start owner session: %v.\nPlease check relay configuration.", err), 0); sendErr != nil {
+			h.logger.Warn().Err(sendErr).Msg("failed to send owner session failure message")
 		}
 		return nil
 	}
@@ -821,8 +807,8 @@ func (h *RelayHandler) getProviderName() string {
 }
 
 func (h *RelayHandler) welcomeDisplayName(messageCtx relaytelegram.MessageContext, ts *relaysession.TopicSession) string {
-	if !messageCtx.IsDM && messageCtx.TopicID > 0 {
-		return rootSessionLabel
+	if !messageCtx.IsDM {
+		return ownerSessionLabel
 	}
 	if ts == nil {
 		return ""

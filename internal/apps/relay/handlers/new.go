@@ -196,7 +196,7 @@ func (h *CommandHandler) onCloseCommand(ctx context.Context, commandCtx relaytel
 		_, _, _ = h.turnDispatcher.CancelSession(commandCtx.Locator, true)
 	}
 	if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Stopping relay provider session. It will be recreated on your next message."); err != nil {
-		log.Warn().Err(err).Int64("chat_id", commandCtx.ChatID).Msg("failed to send /close root confirmation")
+		log.Warn().Err(err).Int64("chat_id", commandCtx.ChatID).Msg("failed to send /close owner session confirmation")
 	}
 	h.sessionManager.StopSession(commandCtx.Locator)
 	return nil

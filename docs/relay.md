@@ -250,13 +250,13 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
 
 Session key:
 
-- Root relay session: `(chat_id, topic_id=0)`
-- Topic subagent session: `(chat_id, topic_id)`
+- Owner session: owner DM `(chat_id, topic_id=0)`
+- Regular session: any other channel address `(chat_id, topic_id)`, including public `topic_id=0`
 - Canonical relay session IDs are channel-scoped. Telegram uses `tg-<chat_id>-<topic_id>`.
-- Root sessions are created lazily on the first owner message in that chat (`topic_id=0`).
+- The owner session is created lazily on the first owner DM in that chat (`topic_id=0`).
 
 Session runtimes are still in-memory, but metadata is persisted in `relay.db`.
-Relay lazy-restores a topic session on first message after restart when metadata exists.
+Relay lazy-restores regular sessions on first message after restart when metadata exists.
 
 ## Message Flow
 
@@ -265,7 +265,7 @@ Relay lazy-restores a topic session on first message after restart when metadata
    - For mention-triggered messages that are replies, relay forwards replied message `text` (fallback `caption`) as model context.
    - In DM chats, relay processes non-command text messages normally.
 2. Relay resolves session by `(chat_id, topic_id)`.
-3. If topic session is missing in memory, relay attempts lazy restore from persisted metadata.
+3. If the session is missing in memory, relay attempts lazy restore from persisted metadata.
 4. Relay calls ADK runner for that session.
 5. Relay streams non-terminal ADK event progress to Telegram via chat actions (and DM thinking draft updates).
 
@@ -285,23 +285,23 @@ Per model turn:
 Relay runs with a single provider per process (`relay.provider`).
 
 - The provider is initialized before message handling.
-- The root relay session (`topic_id=0`) is bootstrapped for the owner chat during activation.
-- Every chat/topic pair maps to its own ADK session, but all sessions in that relay instance use the same provider runtime.
+- The owner session (`topic_id=0` in the owner DM) is bootstrapped for the owner chat during activation.
+- Every regular channel address maps to its own ADK session, including public main-chat `topic_id=0`, but all sessions in that relay instance use the same provider runtime.
 
 ### Manual session control
 
 - `/topic <name>` (DM only, owner/collaborator): creates a new Telegram topic and a topic-bound session.
   - `<name>` is required.
   - `<name>` is a session label, not a provider selector.
-- `/close` (DM only, owner/collaborator): closes current topic session, or stops root session in main chat (`topic_id=0`).
+- `/close` (DM only, owner/collaborator): in the owner DM `topic_id=0`, stops the owner session; in topic contexts, closes that topic and stops that session.
 - `/cancel` (owner/collaborator): cancels active turn and drops queued turns for current session.
 
-### Topic restore/create behavior
+### Session restore/create behavior
 
-- Relay restores persisted topic metadata on first message after restart.
+- Relay restores persisted session metadata on first message after restart.
 - Persisted session label is reused as-is for restore; if missing, relay falls back to label `auto`.
-- If no persisted topic metadata exists, relay creates a new topic session using label `auto`.
-- Public-channel topic welcome banners always display `Name: relay` to keep app identity stable, even when the internal persisted session label differs.
+- If no persisted session metadata exists, relay creates a new regular session using label `auto`.
+- Public-channel welcome banners always display `Name: relay` to keep app identity stable, even when the internal persisted session label differs.
 - Welcome message uses a user-friendly MarkdownV2 format:
   - Example:
     🚀 **Session Started** • **Name:** `relay` • **ID:** `tg-1-0` • **Model:** `opencode/big-pickle` • **Type:** `opencode_acp` • **MCP:** `relay, workspace`
@@ -327,4 +327,4 @@ Relay runs with a single provider per process (`relay.provider`).
 8. Polling mode resumes from persisted Telegram offset in relay state DB.
 9. Non-terminal ADK event progress sends `typing` chat actions in DM and public chats; `sendMessageDraft` thinking placeholders are DM-only.
 10. Final assistant response is sent with `sendMessage` using configured `relay.telegram.formatting_mode` with fallback retry without `parse_mode` on transport or parse/escaping API errors.
-11. `/close` in a topic closes that topic and stops the session; `/close` in root chat stops only root session.
+11. `/close` in a topic closes that topic and stops the session; `/close` in the owner DM main chat stops only the owner session.

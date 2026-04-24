@@ -35,7 +35,7 @@ go tool golangci-lint run
 
 - `/start <owner_token>`: direct message only; owner authentication/bootstrap entrypoint, also used for invite-token collaborator onboarding.
 - `/topic <name>`: owner/collaborator, direct message only; creates a topic session labeled `<name>` using the configured relay provider.
-- `/close`: owner/collaborator, direct message only; closes a topic session or stops the root session.
+- `/close`: owner/collaborator, direct message only; closes a topic session or stops the owner session.
 - `/cancel`: owner/collaborator; cancels in-flight turn processing for the current session and drops queued turns.
 - `/user add|list|remove <user_id>`: owner only; collaborator invite and management commands.
 - Keep command behavior and access expectations backward compatible; when changing commands, update `README.md` and `docs/relay.md` as part of the same change.

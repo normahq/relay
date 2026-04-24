@@ -78,6 +78,89 @@ func TestRelayHandlerOnMessage_PublicTopicAutoCreateWelcomeUsesRelayName(t *test
 	}
 }
 
+func TestRelayHandlerOnMessage_PublicMainChatAutoCreateEnqueuesTurn(t *testing.T) {
+	chatID := int64(-5173524191)
+	locator := relaysession.NewTelegramSessionLocator(chatID, 0)
+	store := &fakeRelayRestoreSessionStore{
+		foundByAddress: false,
+	}
+
+	handler, turns, tgClient := newRelayRestoreHandlerHarness(t, store)
+
+	event := newPublicMainChatMessageEvent(chatID, "@testbot create main chat")
+	if err := handler.onMessage(context.Background(), event); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+
+	if len(turns.enqueueCalls) != 1 {
+		t.Fatalf("Enqueue calls = %d, want 1", len(turns.enqueueCalls))
+	}
+	if got := turns.enqueueCalls[0].SessionID; got != locator.SessionID {
+		t.Fatalf("Enqueue session = %q, want %q", got, locator.SessionID)
+	}
+	assertLastSentContains(t, tgClient, "***Name:*** `relay`")
+	if got := store.lastUpsert.AgentName; got != "auto" {
+		t.Fatalf("persisted label = %q, want auto", got)
+	}
+	if got := store.lastUpsert.SessionID; got != locator.SessionID {
+		t.Fatalf("persisted session = %q, want %q", got, locator.SessionID)
+	}
+}
+
+func TestRelayHandlerOnMessage_PublicMainChatAutoCreateWithUnrelatedActiveSession(t *testing.T) {
+	chatID := int64(-5173524191)
+	locator := relaysession.NewTelegramSessionLocator(chatID, 0)
+	unrelatedLocator := relaysession.NewTelegramSessionLocator(chatID, 77)
+	store := &fakeRelayRestoreSessionStore{
+		foundByAddress: false,
+	}
+
+	handler, turns, _ := newRelayRestoreHandlerHarness(t, store)
+	setUnexportedField(t, handler.sessionManager, "sessions", map[string]*relaysession.TopicSession{
+		unrelatedLocator.SessionID: newRelayTopicSession(t, unrelatedLocator.SessionID),
+	})
+
+	event := newPublicMainChatMessageEvent(chatID, "@testbot use main chat")
+	if err := handler.onMessage(context.Background(), event); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+
+	if len(turns.enqueueCalls) != 1 {
+		t.Fatalf("Enqueue calls = %d, want 1", len(turns.enqueueCalls))
+	}
+	if got := turns.enqueueCalls[0].SessionID; got != locator.SessionID {
+		t.Fatalf("Enqueue session = %q, want %q", got, locator.SessionID)
+	}
+	if got := store.lastUpsert.SessionID; got != locator.SessionID {
+		t.Fatalf("persisted session = %q, want %q", got, locator.SessionID)
+	}
+}
+
+func TestRelayHandlerOnMessage_OwnerDMCreatesOwnerSession(t *testing.T) {
+	locator := relaysession.NewTelegramSessionLocator(9001, 0)
+	store := &fakeRelayRestoreSessionStore{
+		foundByAddress: false,
+	}
+
+	handler, turns, tgClient := newRelayRestoreHandlerHarness(t, store)
+
+	event := newPrivateMessageEvent(9001, "hello owner session")
+	if err := handler.onMessage(context.Background(), event); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+
+	if len(turns.enqueueCalls) != 1 {
+		t.Fatalf("Enqueue calls = %d, want 1", len(turns.enqueueCalls))
+	}
+	if got := turns.enqueueCalls[0].SessionID; got != locator.SessionID {
+		t.Fatalf("Enqueue session = %q, want %q", got, locator.SessionID)
+	}
+	assertLastSentContains(t, tgClient, "***Name:*** `relay`")
+	if got := store.lastUpsert.AgentName; got != "relay" {
+		t.Fatalf("persisted label = %q, want relay", got)
+	}
+}
+
 func newRelayRestoreHandlerHarness(t *testing.T, store *fakeRelayRestoreSessionStore) (*RelayHandler, *fakeTurnDispatcher, *fakeTelegramClient) {
 	t.Helper()
 
@@ -154,6 +237,36 @@ func newPublicTopicMessageEvent(topicID int, text string) *events.MessageEvent {
 			Text:            &text,
 			Entities:        &entities,
 			From:            &client.User{Id: 101},
+		},
+	}
+}
+
+func newPublicMainChatMessageEvent(chatID int64, text string) *events.MessageEvent {
+	entities := []client.MessageEntity{{Type: "mention", Offset: 0, Length: len("@testbot")}}
+	return &events.MessageEvent{
+		Type: messagetype.Text,
+		Message: &client.Message{
+			Chat: client.Chat{
+				Id:   chatID,
+				Type: "supergroup",
+			},
+			Text:     &text,
+			Entities: &entities,
+			From:     &client.User{Id: 101},
+		},
+	}
+}
+
+func newPrivateMessageEvent(chatID int64, text string) *events.MessageEvent {
+	return &events.MessageEvent{
+		Type: messagetype.Text,
+		Message: &client.Message{
+			Chat: client.Chat{
+				Id:   chatID,
+				Type: "private",
+			},
+			Text: &text,
+			From: &client.User{Id: 101},
 		},
 	}
 }

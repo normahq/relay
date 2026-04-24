@@ -429,7 +429,7 @@ func newRelayHandlerTestHarness(t *testing.T) (*StartHandler, *auth.OwnerStore, 
 	return startHandler, ownerStore, tgClient, relayHandler
 }
 
-func TestActivateOwner_BootstrapsRootSession(t *testing.T) {
+func TestActivateOwner_BootstrapsOwnerSession(t *testing.T) {
 	t.Run("calls ActivateOwner and bootstraps session", func(t *testing.T) {
 		handler, store, _, relayHandler := newRelayHandlerTestHarness(t)
 		relayHandler.SetAuthToken("secret-token")
@@ -448,7 +448,7 @@ func TestActivateOwner_BootstrapsRootSession(t *testing.T) {
 		}
 
 		if len(relayHandler.bootstrapCalls) != 1 {
-			t.Fatalf("bootstrapRootSession calls = %d, want 1", len(relayHandler.bootstrapCalls))
+			t.Fatalf("bootstrapOwnerSession calls = %d, want 1", len(relayHandler.bootstrapCalls))
 		}
 		call := relayHandler.bootstrapCalls[0]
 		if call.ownerID != 101 {

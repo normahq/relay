@@ -4,7 +4,7 @@
 [![lint](https://github.com/normahq/relay/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/normahq/relay/actions/workflows/lint.yml)
 
 Relay is a Telegram-first control plane for long-running Norma agent sessions.
-It gives you one authenticated owner channel, root orchestration in direct chat, and topic-scoped sessions started with `/topic <name>`.
+It gives you one authenticated owner channel, an owner session in direct chat, and topic-scoped sessions started with `/topic <name>`.
 
 ## Install
 
@@ -47,7 +47,7 @@ relay start
 
 - `/start <owner_token>`: direct-message auth/bootstrap (also accepts collaborator invite token).
 - `/topic <name>`: owner/collaborator, direct message only; starts a topic session with a required free-form name.
-- `/close`: owner/collaborator, direct message only; closes current topic session or stops root session.
+- `/close`: owner/collaborator, direct message only; closes current topic session or stops the owner session.
 - `/cancel`: owner/collaborator; cancels in-flight turn and drops queued turns for current session.
 - `/user add`: owner only; generates collaborator invite link.
 - `/user list`: owner only; lists collaborators and active invites.

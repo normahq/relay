@@ -293,7 +293,7 @@ func (h *StartHandler) ownerAlreadyRegisteredMessage(startErr error) string {
 
 func (h *StartHandler) activateRelay(ctx context.Context, ownerID, chatID int64) error {
 	if h.relayHandler == nil {
-		log.Warn().Msg("relay handler is nil; skipping root session activation")
+		log.Warn().Msg("relay handler is nil; skipping owner session activation")
 		return nil
 	}
 	if err := h.relayHandler.ActivateOwner(ctx, ownerID, chatID); err != nil {
@@ -301,7 +301,7 @@ func (h *StartHandler) activateRelay(ctx context.Context, ownerID, chatID int64)
 			Err(err).
 			Int64("owner_id", ownerID).
 			Int64("chat_id", chatID).
-			Msg("failed to start root session during /start")
+			Msg("failed to start owner session during /start")
 		return err
 	}
 	return nil

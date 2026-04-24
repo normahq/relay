@@ -79,8 +79,8 @@ func NewAdapter(params AdapterParams) *Adapter {
 	}
 }
 
-// RootLocator returns the root Telegram locator for a chat.
-func (a *Adapter) RootLocator(chatID int64) relaysession.SessionLocator {
+// OwnerLocator returns the Telegram owner-session locator for a chat.
+func (a *Adapter) OwnerLocator(chatID int64) relaysession.SessionLocator {
 	return relaysession.NewTelegramSessionLocator(chatID, 0)
 }
 
