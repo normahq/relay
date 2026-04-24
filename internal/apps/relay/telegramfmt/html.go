@@ -25,7 +25,11 @@ func HTML(text string) string {
 				continue
 			}
 			raw := text[i : i+end+1]
-			if tag, name, closing, ok := telegramHTMLTag(raw); ok {
+			parent := ""
+			if len(stack) > 0 {
+				parent = stack[len(stack)-1]
+			}
+			if tag, name, closing, ok := telegramHTMLTag(raw, parent); ok {
 				if closing {
 					if len(stack) > 0 && stack[len(stack)-1] == name {
 						stack = stack[:len(stack)-1]
@@ -60,7 +64,7 @@ func HTML(text string) string {
 	return out.String()
 }
 
-func telegramHTMLTag(raw string) (tag string, name string, closing bool, ok bool) {
+func telegramHTMLTag(raw, parent string) (tag string, name string, closing bool, ok bool) {
 	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "<"), ">"))
 	if body == "" {
 		return "", "", false, false
@@ -83,7 +87,7 @@ func telegramHTMLTag(raw string) (tag string, name string, closing bool, ok bool
 		return "", "", false, false
 	}
 
-	attrs, ok := telegramHTMLAttrs(name, rest)
+	attrs, ok := telegramHTMLAttrs(name, rest, parent)
 	if !ok {
 		return "", "", false, false
 	}
@@ -111,7 +115,7 @@ func isTelegramHTMLTag(name string) bool {
 	}
 }
 
-func telegramHTMLAttrs(name, raw string) (string, bool) {
+func telegramHTMLAttrs(name, raw, parent string) (string, bool) {
 	attrs := parseHTMLAttrs(raw)
 	switch name {
 	case "a":
@@ -119,8 +123,13 @@ func telegramHTMLAttrs(name, raw string) (string, bool) {
 			return ` href="` + gohtml.EscapeString(href) + `"`, true
 		}
 	case "code":
-		if class, ok := attrs["class"]; ok && strings.HasPrefix(class, "language-") {
+		if class, ok := attrs["class"]; ok && parent == "pre" && strings.HasPrefix(class, "language-") {
 			return ` class="` + gohtml.EscapeString(class) + `"`, true
+		}
+		return "", true
+	case "blockquote":
+		if _, ok := attrs["expandable"]; ok {
+			return " expandable", true
 		}
 		return "", true
 	case "span":
@@ -133,9 +142,15 @@ func telegramHTMLAttrs(name, raw string) (string, bool) {
 			return ` emoji-id="` + gohtml.EscapeString(emojiID) + `"`, true
 		}
 	case "tg-time":
-		if datetime, ok := attrs["datetime"]; ok && strings.TrimSpace(datetime) != "" {
-			return ` datetime="` + gohtml.EscapeString(datetime) + `"`, true
+		unix, ok := attrs["unix"]
+		if !ok || strings.TrimSpace(unix) == "" {
+			return "", false
 		}
+		out := ` unix="` + gohtml.EscapeString(unix) + `"`
+		if format, ok := attrs["format"]; ok && strings.TrimSpace(format) != "" {
+			out += ` format="` + gohtml.EscapeString(format) + `"`
+		}
+		return out, true
 	default:
 		return "", true
 	}
