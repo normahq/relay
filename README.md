@@ -53,27 +53,167 @@ relay start
 - `/user list`: owner only; lists collaborators and active invites.
 - `/user remove <user_id>`: owner only; removes a collaborator.
 
-## Config At A Glance
+## Configuration
 
 Relay loads `.config/relay/config.yaml` and then applies `RELAY_*` environment overrides.
 If present, `.env` from the current working directory is auto-loaded before config resolution.
 
+Config resolution order:
+
+1. bundled defaults
+2. `.config/relay/config.yaml`
+3. selected profile overrides from `profiles.<name>`
+4. `RELAY_*` environment variables
+
+The generated config uses this shape:
+
 ```yaml
 runtime:
-  providers: {}
-  mcp_servers: {}
+  providers:
+    <provider_id>:
+      # Required. Supported values:
+      # generic_acp | gemini_acp | codex_acp | opencode_acp | copilot_acp | claude_code_acp | pool
+      type: codex_acp
+
+      # Optional MCP server IDs from runtime.mcp_servers for this provider.
+      mcp_servers: []
+
+      # Optional provider instruction appended after relay.global_instruction.
+      system_instructions: ""
+
+      # Type-specific block. Use the block matching `type`.
+      codex_acp:
+        # Optional model/mode/command settings for ACP agent types.
+        model: gpt-5.3-codex
+        mode: ""
+        cmd: []
+        extra_args: []
+
+      # Other ACP type-specific blocks have the same fields:
+      # generic_acp: {}
+      # gemini_acp: {}
+      # opencode_acp: {}
+      # copilot_acp: {}
+      # claude_code_acp: {}
+
+      # Pool providers use this instead of an ACP block:
+      # pool:
+      #   members: [codex, opencode]
+
+  mcp_servers:
+    <server_id>:
+      # Required. Supported values: stdio | http | sse
+      type: stdio
+
+      # stdio transport:
+      cmd: []
+      args: []
+      env: {}
+      working_dir: ""
+
+      # http/sse transport:
+      url: ""
+      headers: {}
+
 relay:
+  # Provider ID from runtime.providers used for owner and topic sessions.
   provider: ""
+
   telegram:
+    # Required unless RELAY_TELEGRAM_TOKEN is set.
     token: ""
+
+    # Final assistant response mode: markdownv2 | html | none.
     formatting_mode: "markdownv2" # markdownv2 | html | none
+
+    webhook:
+      enabled: false
+      url: ""
+      auth_token: ""
+      listen_addr: "0.0.0.0:8080"
+      path: "/telegram/webhook"
+
+  logger:
+    level: "info"
+    pretty: true
+
+  # Defaults to the relay process working directory when empty.
+  working_dir: ""
+
+  # Relative paths are resolved from relay.working_dir.
+  state_dir: ".config/relay"
+
   workspace:
-    mode: "auto"
+    mode: "auto" # auto | on | off
     base_branch: ""
+
+  # Extra runtime.mcp_servers IDs injected into every relay-started session.
+  # The built-in `relay` MCP server is reserved and added automatically.
   mcp_servers: []
+
+  # Optional relay-wide instruction applied to all sessions.
   global_instruction: ""
-profiles: {}
+
+profiles:
+  <profile_name>:
+    relay:
+      provider: <provider_id>
+      mcp_servers: []
+      global_instruction: ""
 ```
+
+### MCP Servers Example
+
+Define reusable MCP servers in `runtime.mcp_servers`, then attach them either to one provider with `runtime.providers.<provider_id>.mcp_servers` or to every relay session with `relay.mcp_servers`.
+
+```yaml
+runtime:
+  mcp_servers:
+    filesystem:
+      type: stdio
+      cmd: ["npx"]
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "/home/me/project"
+
+    github:
+      type: stdio
+      cmd: ["npx"]
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+
+    remote-tools:
+      type: http
+      url: "https://mcp.example.com/mcp"
+      headers:
+        Authorization: "Bearer ${REMOTE_MCP_TOKEN}"
+
+  providers:
+    codex:
+      type: codex_acp
+      mcp_servers:
+        - filesystem
+      codex_acp:
+        model: gpt-5.3-codex
+
+relay:
+  provider: codex
+  mcp_servers:
+    - github
+    - remote-tools
+```
+
+Effective MCP IDs for a session are:
+
+```text
+built-in relay + provider mcp_servers + relay.mcp_servers
+```
+
+The built-in `relay` MCP server is always reserved for Relay’s own tools. Do not define `runtime.mcp_servers.relay`; Relay starts that server internally.
 
 ## Troubleshooting
 

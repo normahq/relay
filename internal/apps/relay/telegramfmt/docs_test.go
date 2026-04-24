@@ -49,6 +49,33 @@ func TestUserDocsLinkTelegramFormattingGuide(t *testing.T) {
 	}
 }
 
+func TestReadmeDocumentsRelayConfigShapeAndMCPServers(t *testing.T) {
+	t.Parallel()
+
+	doc := readRepoDoc(t, "README.md")
+	for _, want := range []string{
+		"## Configuration",
+		"runtime:",
+		"providers:",
+		"mcp_servers:",
+		"generic_acp | gemini_acp | codex_acp | opencode_acp | copilot_acp | claude_code_acp | pool",
+		"webhook:",
+		"logger:",
+		"working_dir:",
+		"state_dir:",
+		"global_instruction:",
+		"### MCP Servers Example",
+		"type: stdio",
+		"type: http",
+		"built-in relay + provider mcp_servers + relay.mcp_servers",
+		"Do not define `runtime.mcp_servers.relay`",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("README.md missing %q", want)
+		}
+	}
+}
+
 func readRepoDoc(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile("../../../../" + path)
