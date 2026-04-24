@@ -276,7 +276,7 @@ Per model turn:
 
 1. Non-terminal ADK events send throttled `sendChatAction` with `typing` for the same chat/topic; DM chats also emit throttled plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
 2. Final assistant text is sent with `sendMessage` using `relay.telegram.formatting_mode`:
-   - `markdownv2`: model writes Markdown/plain text; Relay converts it to Telegram MarkdownV2, preserves line breaks, and sends with `parse_mode=MarkdownV2`.
+   - `markdownv2`: model writes Markdown/plain text; Relay converts it to Telegram MarkdownV2 and sends with `parse_mode=MarkdownV2`.
    - `html`: model writes Telegram HTML; Relay sends text with `parse_mode=HTML`.
    - `none`: Relay sends text without `parse_mode`.
 3. If send fails at transport level, or Telegram returns parse/escaping API errors (for example `can't parse entities`), relay retries once without `parse_mode`.

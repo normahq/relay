@@ -520,12 +520,7 @@ func (h *RelayHandler) runTurn(
 		Logger().
 		WithContext(ctx)
 
-	lastFinalResponseText := ""
-	lastNonPartialText := ""
-	lastPartialText := ""
-	hasFinalCandidate := false
-	hasFallbackCandidate := false
-	hasPartialCandidate := false
+	var streamedText strings.Builder
 	sawTurnComplete := false
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
@@ -605,18 +600,10 @@ func (h *RelayHandler) runTurn(
 			}
 		}
 		eventText := eventTextBuilder.String()
-		if strings.TrimSpace(eventText) != "" {
-			if ev.Partial {
-				lastPartialText = mergeADKTextChunk(lastPartialText, eventText, hasPartialCandidate)
-				hasPartialCandidate = strings.TrimSpace(lastPartialText) != ""
-			}
-			if !ev.Partial {
-				lastNonPartialText = eventText
-				hasFallbackCandidate = true
-			}
-			if ev.IsFinalResponse() {
-				lastFinalResponseText = mergeADKTextChunk(lastFinalResponseText, eventText, hasFinalCandidate)
-				hasFinalCandidate = true
+		if eventText != "" {
+			currentText := streamedText.String()
+			if !ev.IsFinalResponse() || ev.Partial || eventText != currentText {
+				streamedText.WriteString(eventText)
 			}
 		}
 		zerolog.Ctx(runCtx).Debug().
@@ -649,28 +636,12 @@ func (h *RelayHandler) runTurn(
 			Bool("skip_summarization", ev.Actions.SkipSummarization).
 			Str("transfer_to_agent", strings.TrimSpace(ev.Actions.TransferToAgent)).
 			Bool("escalate", ev.Actions.Escalate).
-			Bool("final_candidate_present", hasFinalCandidate).
-			Bool("fallback_candidate_present", hasFallbackCandidate).
-			Bool("partial_candidate_present", hasPartialCandidate).
-			Int("final_candidate_char_count", len(lastFinalResponseText)).
-			Int("fallback_candidate_char_count", len(lastNonPartialText)).
-			Int("partial_candidate_char_count", len(lastPartialText)).
+			Bool("final_response", ev.IsFinalResponse()).
+			Int("streamed_text_char_count", streamedText.Len()).
 			Msg("received ACP event")
 		if ev.TurnComplete {
 			sawTurnComplete = true
-			responseText := ""
-			responseSource := "none"
-			switch {
-			case hasFinalCandidate:
-				responseText = lastFinalResponseText
-				responseSource = "final_response"
-			case hasFallbackCandidate:
-				responseText = lastNonPartialText
-				responseSource = "non_partial_fallback"
-			case hasPartialCandidate:
-				responseText = lastPartialText
-				responseSource = "partial_text_fallback"
-			}
+			responseText := streamedText.String()
 			responseEmitted := false
 			if strings.TrimSpace(responseText) != "" {
 				if sendErr := h.channel.SendAgentReply(ctx, locator, responseText); sendErr != nil {
@@ -680,7 +651,7 @@ func (h *RelayHandler) runTurn(
 				}
 			}
 			zerolog.Ctx(runCtx).Debug().
-				Str("response_source", responseSource).
+				Str("response_source", "streamed_text").
 				Bool("response_emitted_on_turn_complete", responseEmitted).
 				Msg("processed turn complete event")
 			break
@@ -688,30 +659,11 @@ func (h *RelayHandler) runTurn(
 	}
 	if !sawTurnComplete {
 		zerolog.Ctx(runCtx).Warn().
-			Bool("final_candidate_present", hasFinalCandidate).
-			Bool("fallback_candidate_present", hasFallbackCandidate).
-			Bool("partial_candidate_present", hasPartialCandidate).
+			Int("streamed_text_char_count", streamedText.Len()).
 			Msg("ACP stream ended without turn complete; suppressing relay response")
 	}
 
 	return nil
-}
-
-func mergeADKTextChunk(current, incoming string, hasCurrent bool) string {
-	if !hasCurrent {
-		return incoming
-	}
-	switch {
-	case strings.HasPrefix(incoming, current):
-		// Cumulative stream snapshot.
-		return incoming
-	case strings.HasPrefix(current, incoming):
-		// Shorter duplicate snapshot.
-		return current
-	default:
-		// Delta stream chunk.
-		return current + incoming
-	}
 }
 
 func (h *RelayHandler) getOwnerID() int64 {

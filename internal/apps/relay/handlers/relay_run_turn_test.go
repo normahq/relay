@@ -391,7 +391,7 @@ func TestRunTurn_SendsFinalResponseWithoutParseModeWhenConfiguredNone(t *testing
 	}
 }
 
-func TestRunTurn_SendsOnlyFinalTextOnTurnComplete(t *testing.T) {
+func TestRunTurn_SkipsExactDuplicateFinalAfterStreamedText(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -409,7 +409,7 @@ func TestRunTurn_SendsOnlyFinalTextOnTurnComplete(t *testing.T) {
 	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
 		partial := adksession.NewEvent(invocationID)
 		partial.Partial = true
-		partial.Content = genai.NewContentFromText("progress update", genai.RoleModel)
+		partial.Content = genai.NewContentFromText("final answer", genai.RoleModel)
 
 		final := adksession.NewEvent(invocationID)
 		final.Content = genai.NewContentFromText("final answer", genai.RoleModel)
@@ -477,7 +477,7 @@ func TestRunTurn_MergesFinalResponseDeltaChunksOnTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_MergesFinalResponseCumulativeChunksOnTurnComplete(t *testing.T) {
+func TestRunTurn_AppendsFinalResponseTextEventsOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -516,12 +516,12 @@ func TestRunTurn_MergesFinalResponseCumulativeChunksOnTurnComplete(t *testing.T)
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := tgClient.messages[0].Text; got != "Doing well." {
-		t.Fatalf("message text = %q, want Doing well.", got)
+	if got := tgClient.messages[0].Text; got != "DoingDoing wellDoing well." {
+		t.Fatalf("message text = %q, want appended chunks", got)
 	}
 }
 
-func TestRunTurn_UsesLastNonPartialFallbackOnTurnComplete(t *testing.T) {
+func TestRunTurn_AppendsNonPartialTextEventsOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -568,8 +568,8 @@ func TestRunTurn_UsesLastNonPartialFallbackOnTurnComplete(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "new fallback" {
-		t.Fatalf("message text = %q, want new fallback", tgClient.messages[0].Text)
+	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "old fallbacknew fallback" {
+		t.Fatalf("message text = %q, want appended fallback text", tgClient.messages[0].Text)
 	}
 }
 
@@ -647,7 +647,7 @@ func TestRunTurn_UsesPartialDeltaFallbackOnTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_UsesPartialCumulativeFallbackOnTurnComplete(t *testing.T) {
+func TestRunTurn_AppendsPartialChunksInOrderOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -666,15 +666,15 @@ func TestRunTurn_UsesPartialCumulativeFallbackOnTurnComplete(t *testing.T) {
 	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
 		partialOne := adksession.NewEvent(invocationID)
 		partialOne.Partial = true
-		partialOne.Content = genai.NewContentFromText("Doing", genai.RoleModel)
+		partialOne.Content = genai.NewContentFromText("**Статус задачи**", genai.RoleModel)
 
 		partialTwo := adksession.NewEvent(invocationID)
 		partialTwo.Partial = true
-		partialTwo.Content = genai.NewContentFromText("Doing well", genai.RoleModel)
+		partialTwo.Content = genai.NewContentFromText("\n", genai.RoleModel)
 
 		partialThree := adksession.NewEvent(invocationID)
 		partialThree.Partial = true
-		partialThree.Content = genai.NewContentFromText("Doing well.", genai.RoleModel)
+		partialThree.Content = genai.NewContentFromText("- **Task:** `relay-runtime`\n- **Status:** in progress", genai.RoleModel)
 
 		done := adksession.NewEvent(invocationID)
 		done.TurnComplete = true
@@ -689,8 +689,9 @@ func TestRunTurn_UsesPartialCumulativeFallbackOnTurnComplete(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "Doing well." {
-		t.Fatalf("message text = %q, want Doing well.", tgClient.messages[0].Text)
+	want := "**Статус задачи**\n- **Task:** `relay-runtime`\n- **Status:** in progress"
+	if got := strings.TrimSpace(tgClient.messages[0].Text); got != want {
+		t.Fatalf("message text = %q, want %q", tgClient.messages[0].Text, want)
 	}
 }
 

@@ -209,7 +209,7 @@ func TestBuildRelayInstruction_IncludesFormattingGuidance_DefaultMarkdownV2(t *t
 
 	wantSnippets := []string{
 		"Telegram formatting mode: `markdownv2`.",
-		"Write normal Markdown or plain text. Relay converts it to Telegram MarkdownV2 and preserves natural line breaks; do not pre-escape Telegram MarkdownV2 reserved characters.",
+		"Write normal Markdown or plain text. Relay converts it to Telegram MarkdownV2; use Markdown blank lines or lists for structure, and do not pre-escape Telegram MarkdownV2 reserved characters.",
 		"Example output: **Build:** success. Run `relay start`.",
 	}
 	for _, snippet := range wantSnippets {

@@ -83,14 +83,6 @@ func (m *Messenger) SendPlain(ctx context.Context, chatID int64, text string, to
 
 // SendMarkdown converts standard Markdown to Telegram MarkdownV2 and sends.
 func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string, topicID int) error {
-	return m.sendMarkdown(ctx, chatID, text, topicID, false)
-}
-
-func (m *Messenger) sendMarkdown(ctx context.Context, chatID int64, text string, topicID int, preserveLineBreaks bool) error {
-	if preserveLineBreaks {
-		text = markdownWithHardLineBreaks(text)
-	}
-
 	var buf bytes.Buffer
 	md := tgmd.TGMD()
 	if err := md.Convert([]byte(text), &buf); err != nil {
@@ -108,47 +100,8 @@ func (m *Messenger) SendAgentReply(ctx context.Context, chatID int64, text strin
 	case telegramfmt.ModeNone:
 		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeNone), "send message without parse_mode")
 	default:
-		return m.sendMarkdown(ctx, chatID, text, topicID, true)
+		return m.SendMarkdown(ctx, chatID, text, topicID)
 	}
-}
-
-func markdownWithHardLineBreaks(text string) string {
-	normalized := strings.ReplaceAll(text, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-
-	lines := strings.Split(normalized, "\n")
-	if len(lines) <= 1 {
-		return normalized
-	}
-
-	inFence := false
-	for i := 0; i < len(lines)-1; i++ {
-		if isMarkdownFenceLine(lines[i]) {
-			inFence = !inFence
-			continue
-		}
-		if inFence || strings.TrimSpace(lines[i]) == "" || strings.TrimSpace(lines[i+1]) == "" {
-			continue
-		}
-		lines[i] = ensureMarkdownHardBreak(lines[i])
-	}
-	return strings.Join(lines, "\n")
-}
-
-func ensureMarkdownHardBreak(line string) string {
-	if strings.HasSuffix(line, "\\") || strings.HasSuffix(line, "  ") {
-		return line
-	}
-	trimmedRight := strings.TrimRight(line, " ")
-	return trimmedRight + "  "
-}
-
-func isMarkdownFenceLine(line string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
-		return false
-	}
-	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
 }
 
 func (m *Messenger) sendMessageWithMode(ctx context.Context, chatID int64, text string, topicID int, mode, logMsg string) error {

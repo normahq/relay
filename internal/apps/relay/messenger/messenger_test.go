@@ -306,22 +306,53 @@ func TestSendAgentReply_RetriesWithoutParseModeOnTransportError(t *testing.T) {
 	}
 }
 
-func TestSendAgentReply_MarkdownV2PreservesSoftLineBreaks(t *testing.T) {
+func TestSendAgentReply_MarkdownV2PreservesMarkdownStructure(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &fakeChatActionClient{}
 	m := NewMessenger(tgClient, zerolog.Nop())
 	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
 
-	if err := m.SendAgentReply(context.Background(), 9001, "Hey there\nWhat do you want to work on?", 77); err != nil {
+	input := "Конечно. Вот быстрые практичные примеры:\n\n" +
+		"**Статус задачи**\n" +
+		"- **Task:** `relay-runtime`\n" +
+		"- **Status:** in progress\n" +
+		"- **Next:** run tests\n\n" +
+		"**Результат команды**\n" +
+		"- **Build:** success\n" +
+		"- **Lint:** failed on `internal/relay/session.go:42`\n" +
+		"- **Action:** fix lint and rerun\n\n" +
+		"```bash\n" +
+		"go test -race ./...\n" +
+		"go tool golangci-lint run\n" +
+		"```"
+	if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
 		t.Fatalf("SendAgentReply() error = %v", err)
 	}
 
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
 	}
-	if !strings.Contains(tgClient.messages[0].Text, "Hey there\nWhat do you want to work on?") {
-		t.Fatalf("message text = %q, want preserved line break", tgClient.messages[0].Text)
+	got := tgClient.messages[0].Text
+	for _, unwanted := range []string{
+		"in progress\\- ***Next",
+		"run tests***Результат",
+		"success\\- ***Lint",
+		"rerun```bash",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("message text = %q, contains glued markdown fragment %q", got, unwanted)
+		}
+	}
+	for _, want := range []string{
+		"***Статус задачи***",
+		"***Результат команды***",
+		"`relay\\-runtime`",
+		"```bash\ngo test -race ./...\ngo tool golangci-lint run\n```",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("message text = %q, want to contain %q", got, want)
+		}
 	}
 }
 
