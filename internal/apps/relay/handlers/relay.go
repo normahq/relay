@@ -14,6 +14,7 @@ import (
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
 	relaysession "github.com/normahq/relay/internal/apps/relay/session"
+	"github.com/normahq/relay/internal/throttle"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/tgbotkit/client"
@@ -528,7 +529,7 @@ func (h *RelayHandler) runTurn(
 	sawTurnComplete := false
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
-	var lastTypingSent time.Time
+	typingThrottle := throttle.New(telegramTypingThrottleInterval, throttle.WithClock(h.currentTime))
 
 	for ev, err := range r.Run(runCtx, userID, agentSessionID, userContent, agent.RunConfig{}) {
 		if err != nil {
@@ -539,13 +540,11 @@ func (h *RelayHandler) runTurn(
 		}
 		if !ev.TurnComplete {
 			if progressPolicy.Typing {
-				now := h.currentTime()
-				if lastTypingSent.IsZero() || now.Sub(lastTypingSent) >= telegramTypingThrottleInterval {
-					lastTypingSent = now
+				typingThrottle.Do(func() {
 					if sendErr := h.channel.SendTyping(ctx, locator); sendErr != nil {
 						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send typing chat action")
 					}
-				}
+				})
 			}
 			if progressPolicy.Thinking {
 				if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
