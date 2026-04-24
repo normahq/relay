@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	gohtml "html"
+	"net/http"
 	"strings"
 	"time"
 
@@ -229,10 +230,16 @@ func (m *Messenger) SendChatAction(ctx context.Context, chatID int64, topicID in
 	if err != nil {
 		return fmt.Errorf("sending chat action %q to chat %d: %w", action, chatID, err)
 	}
+	if resp == nil {
+		return fmt.Errorf("sending chat action %q to chat %d: no response body", action, chatID)
+	}
 	if resp.JSON400 != nil {
 		return fmt.Errorf("sending chat action %q to chat %d: %s", action, chatID, resp.JSON400.Description)
 	}
 	if resp.JSON200 == nil {
+		if resp.HTTPResponse != nil && resp.HTTPResponse.StatusCode >= http.StatusOK && resp.HTTPResponse.StatusCode < http.StatusMultipleChoices {
+			return nil
+		}
 		return fmt.Errorf("sending chat action %q to chat %d: no response body", action, chatID)
 	}
 	return nil

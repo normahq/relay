@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	relaychannel "github.com/normahq/relay/internal/apps/relay/channel"
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
@@ -120,8 +121,8 @@ func TestRunTurn_SendsProgressForNonTerminalEventsInDM(t *testing.T) {
 		}
 	}
 
-	if len(tgClient.chatActions) != 3 {
-		t.Fatalf("chat action calls = %d, want 3", len(tgClient.chatActions))
+	if len(tgClient.chatActions) != 1 {
+		t.Fatalf("chat action calls = %d, want 1", len(tgClient.chatActions))
 	}
 	for i, action := range tgClient.chatActions {
 		if action.Action != "typing" {
@@ -206,8 +207,8 @@ func TestRunTurn_SendsTypingWithoutThinkingDraftInPublicChat(t *testing.T) {
 	if len(tgClient.drafts) != 0 {
 		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
 	}
-	if len(tgClient.chatActions) != 3 {
-		t.Fatalf("chat action calls = %d, want 3", len(tgClient.chatActions))
+	if len(tgClient.chatActions) != 1 {
+		t.Fatalf("chat action calls = %d, want 1", len(tgClient.chatActions))
 	}
 	for i, action := range tgClient.chatActions {
 		if action.Action != "typing" {
@@ -256,8 +257,8 @@ func TestRunTurn_SendsProgressForNonThoughtEvents(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.chatActions) != 2 {
-		t.Fatalf("chat action calls = %d, want 2", len(tgClient.chatActions))
+	if len(tgClient.chatActions) != 1 {
+		t.Fatalf("chat action calls = %d, want 1", len(tgClient.chatActions))
 	}
 	if len(tgClient.drafts) != 0 {
 		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
@@ -267,6 +268,51 @@ func TestRunTurn_SendsProgressForNonThoughtEvents(t *testing.T) {
 	}
 	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "visible" {
 		t.Fatalf("message text = %q, want visible", tgClient.messages[0].Text)
+	}
+}
+
+func TestRunTurn_SendsTypingAgainAfterThrottleInterval(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	baseTime := time.Date(2026, 4, 24, 20, 0, 0, 0, time.UTC)
+	times := []time.Time{
+		baseTime,
+		baseTime.Add(telegramTypingThrottleInterval - time.Second),
+		baseTime.Add(telegramTypingThrottleInterval),
+	}
+	timeIdx := 0
+	h := &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+		now: func() time.Time {
+			if timeIdx >= len(times) {
+				return times[len(times)-1]
+			}
+			now := times[timeIdx]
+			timeIdx++
+			return now
+		},
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunner(t)
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.chatActions) != 2 {
+		t.Fatalf("chat action calls = %d, want 2", len(tgClient.chatActions))
+	}
+	if timeIdx != len(times) {
+		t.Fatalf("clock calls = %d, want %d", timeIdx, len(times))
 	}
 }
 

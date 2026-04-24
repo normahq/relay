@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	relaychannel "github.com/normahq/relay/internal/apps/relay/channel"
@@ -32,8 +33,9 @@ type relayAuthorizer struct {
 }
 
 const (
-	ownerSessionLabel = "relay"
-	autoSessionLabel  = "auto"
+	ownerSessionLabel              = "relay"
+	autoSessionLabel               = "auto"
+	telegramTypingThrottleInterval = 4 * time.Second
 )
 
 func (a *relayAuthorizer) IsOwner(userID int64) bool {
@@ -67,6 +69,7 @@ type RelayHandler struct {
 	chatID      int64
 	botUsername string
 	botUserID   int64
+	now         func() time.Time
 }
 
 type relayHandlerDeps struct {
@@ -525,6 +528,7 @@ func (h *RelayHandler) runTurn(
 	sawTurnComplete := false
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
+	var lastTypingSent time.Time
 
 	for ev, err := range r.Run(runCtx, userID, agentSessionID, userContent, agent.RunConfig{}) {
 		if err != nil {
@@ -535,8 +539,12 @@ func (h *RelayHandler) runTurn(
 		}
 		if !ev.TurnComplete {
 			if progressPolicy.Typing {
-				if sendErr := h.channel.SendTyping(ctx, locator); sendErr != nil {
-					log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send typing chat action")
+				now := h.currentTime()
+				if lastTypingSent.IsZero() || now.Sub(lastTypingSent) >= telegramTypingThrottleInterval {
+					lastTypingSent = now
+					if sendErr := h.channel.SendTyping(ctx, locator); sendErr != nil {
+						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send typing chat action")
+					}
 				}
 			}
 			if progressPolicy.Thinking {
@@ -850,6 +858,13 @@ func composeMentionTriggeredInput(userMessage, replyContent string) (string, boo
 	default:
 		return "", false
 	}
+}
+
+func (h *RelayHandler) currentTime() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
 }
 
 func (h *RelayHandler) getBotIdentity() (int64, string) {

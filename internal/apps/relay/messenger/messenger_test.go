@@ -17,8 +17,14 @@ const testParseModeHTML = "HTML"
 type fakeChatActionClient struct {
 	client.ClientWithResponsesInterface
 	chatActions        []client.SendChatActionJSONRequestBody
+	chatActionResults  []sendChatActionResult
 	messages           []client.SendMessageJSONRequestBody
 	sendMessageResults []sendMessageResult
+}
+
+type sendChatActionResult struct {
+	resp *client.SendChatActionResponse
+	err  error
 }
 
 type sendMessageResult struct {
@@ -32,6 +38,11 @@ func (f *fakeChatActionClient) SendChatActionWithResponse(
 	_ ...client.RequestEditorFn,
 ) (*client.SendChatActionResponse, error) {
 	f.chatActions = append(f.chatActions, body)
+	if len(f.chatActionResults) > 0 {
+		result := f.chatActionResults[0]
+		f.chatActionResults = f.chatActionResults[1:]
+		return result.resp, result.err
+	}
 	return &client.SendChatActionResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK, Status: "200 OK"},
 		JSON200: &struct {
@@ -107,6 +118,49 @@ func TestSendChatAction_OmitsMessageThreadIDForRootChat(t *testing.T) {
 	}
 	if tgClient.chatActions[0].MessageThreadId != nil {
 		t.Fatalf("message_thread_id = %v, want nil", tgClient.chatActions[0].MessageThreadId)
+	}
+}
+
+func TestSendChatAction_AllowsEmptySuccessResponseBody(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{
+		chatActionResults: []sendChatActionResult{
+			{
+				resp: &client.SendChatActionResponse{
+					HTTPResponse: &http.Response{StatusCode: http.StatusOK, Status: "200 OK"},
+				},
+			},
+		},
+	}
+	m := NewMessenger(tgClient, zerolog.Nop())
+
+	if err := m.SendChatAction(context.Background(), -5173524191, 0, "typing"); err != nil {
+		t.Fatalf("SendChatAction() error = %v, want nil", err)
+	}
+}
+
+func TestSendChatAction_ReturnsTelegramErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{
+		chatActionResults: []sendChatActionResult{
+			{
+				resp: &client.SendChatActionResponse{
+					HTTPResponse: &http.Response{StatusCode: http.StatusBadRequest, Status: "400 Bad Request"},
+					JSON400:      &client.ErrorResponse{Description: "Bad Request: chat not found"},
+				},
+			},
+		},
+	}
+	m := NewMessenger(tgClient, zerolog.Nop())
+
+	err := m.SendChatAction(context.Background(), 9001, 0, "typing")
+	if err == nil {
+		t.Fatal("SendChatAction() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "chat not found") {
+		t.Fatalf("SendChatAction() error = %v, want chat not found", err)
 	}
 }
 
