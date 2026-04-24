@@ -176,8 +176,8 @@ github.com/clipperhouse/stringish v0.1.1/go.mod h1:v/WhFtE1q0ovMta2+m+UbpZ+2/HEX
 github.com/clipperhouse/uax29/v2 v2.5.0 h1:x7T0T4eTHDONxFJsL94uKNKPHrclyFI0lm7+w94cO8U=
 github.com/clipperhouse/uax29/v2 v2.5.0/go.mod h1:Wn1g7MK6OoeDT0vL+Q0SQLDz/KpfsVRgg6W7ihQeh4g=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
-github.com/coder/acp-go-sdk v0.6.3 h1:LsXQytehdjKIYJnoVWON/nf7mqbiarnyuyE3rrjBsXQ=
-github.com/coder/acp-go-sdk v0.6.3/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=
+github.com/coder/acp-go-sdk v0.12.0 h1:GoIC6RrkPMBIVQ3ckSkl+bO/ERV/IRK6clBdZmx4Uf4=
+github.com/coder/acp-go-sdk v0.12.0/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=
 github.com/containerd/continuity v0.4.3 h1:6HVkalIp+2u1ZLH1J/pYX2oBVXlJZvh1X1A7bEZ9Su8=
 github.com/containerd/continuity v0.4.3/go.mod h1:F6PTNCKepoxEaXLQp3wDAjygEnImnZ/7o4JzpodfroQ=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
@@ -577,10 +577,8 @@ github.com/nishanths/exhaustive v0.12.0 h1:vIY9sALmw6T/yxiASewa4TQcFsVYZQQRUQJhK
 github.com/nishanths/exhaustive v0.12.0/go.mod h1:mEZ95wPIZW+x8kC4TgC+9YCUgiST7ecevsVDTgc2obs=
 github.com/nishanths/predeclared v0.2.2 h1:V2EPdZPliZymNAn79T8RkNApBjMmVKh5XRpLm/w98Vk=
 github.com/nishanths/predeclared v0.2.2/go.mod h1:RROzoN6TnGQupbC+lqggsOlcgysk3LMK/HI84Mp280c=
-github.com/normahq/norma v0.0.0-20260423103711-39bda87dec66 h1:ceo7EG+1FdwMqA5umOktejhhyRwOIctzFcMGMYR8lpc=
-github.com/normahq/norma v0.0.0-20260423103711-39bda87dec66/go.mod h1:gAcj4+ov658iyUdxAsPRN1iF12Dwr2WtsrKGmSldq44=
-github.com/normahq/norma v0.0.0-20260424032244-d18f4932b75b h1:9RL31V81EKUZ2NCRM95SllKiEi/4nTUCrM3dQ/B11ps=
-github.com/normahq/norma v0.0.0-20260424032244-d18f4932b75b/go.mod h1:gAcj4+ov658iyUdxAsPRN1iF12Dwr2WtsrKGmSldq44=
+github.com/normahq/norma v0.0.0-20260424171718-bf1dc8ba8bf1 h1:i9Atrvz/89cZg6e2QFu+zQSqz7ViHD4hInrxYXM3XTs=
+github.com/normahq/norma v0.0.0-20260424171718-bf1dc8ba8bf1/go.mod h1:mdPC0TZnY0FFY/tGoBjnCy/p08epwGc+E0HzmhSYFso=
 github.com/nunnatsa/ginkgolinter v0.23.0 h1:x3o4DGYOWbBMP/VdNQKgSj+25aJKx2Pe6lHr8gBcgf8=
 github.com/nunnatsa/ginkgolinter v0.23.0/go.mod h1:9qN1+0akwXEccwV1CAcCDfcoBlWXHB+ML9884pL4SZ4=
 github.com/oapi-codegen/runtime v1.1.2 h1:P2+CubHq8fO4Q6fV1tqDBZHCwpVpvPg7oKiYzQgXIyI=

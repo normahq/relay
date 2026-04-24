@@ -634,6 +634,63 @@ func TestRunTurn_DoesNotLeakNonFinalProgressTextInPublicChat(t *testing.T) {
 	}
 }
 
+func TestRunTurn_SendsFinalTextFromTurnCompleteEvent(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	msg.SetAgentReplyFormattingMode("none")
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	h := &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		progress := adksession.NewEvent(invocationID)
+		progress.Partial = true
+		progress.Content = genai.NewContentFromText("working...", genai.RoleModel)
+
+		toolUpdate := adksession.NewEvent(invocationID)
+		toolUpdate.Content = &genai.Content{
+			Role: genai.RoleModel,
+			Parts: []*genai.Part{
+				{
+					FunctionResponse: &genai.FunctionResponse{
+						ID:   "tool-1",
+						Name: "acp_tool_call_update",
+						Response: map[string]any{
+							"status": "completed",
+						},
+					},
+				},
+			},
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		done.FinishReason = genai.FinishReasonStop
+		done.TurnComplete = true
+
+		return []*adksession.Event{progress, toolUpdate, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != "final answer" {
+		t.Fatalf("message text = %q, want final answer", got)
+	}
+}
+
 func TestRunTurn_DoesNotSendWithoutTurnComplete(t *testing.T) {
 	t.Parallel()
 
