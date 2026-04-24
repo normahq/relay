@@ -125,6 +125,9 @@ func TestPromptRuleAndExample(t *testing.T) {
 			if !strings.Contains(gotRule, tt.wantRule) {
 				t.Fatalf("PromptRuleAndExample(%q) rule = %q, want to contain %q", tt.mode, gotRule, tt.wantRule)
 			}
+			if tt.mode == ModeMarkdownV2 && !strings.Contains(gotRule, "do not pre-escape Telegram MarkdownV2 reserved characters") {
+				t.Fatalf("PromptRuleAndExample(%q) rule = %q, want normal Markdown contract", tt.mode, gotRule)
+			}
 			if gotExample != tt.wantExample {
 				t.Fatalf("PromptRuleAndExample(%q) example = %q, want %q", tt.mode, gotExample, tt.wantExample)
 			}

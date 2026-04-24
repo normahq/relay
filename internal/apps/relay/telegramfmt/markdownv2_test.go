@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestMarkdownV2ConvertsFailingACPSample(t *testing.T) {
+func TestMarkdownV2ConvertsNormalMarkdownSample(t *testing.T) {
 	t.Parallel()
 
-	input := "Привет\\! Вот короткий пример доступного форматирования:\n\n" +
+	input := "Привет! Вот короткий пример доступного форматирования:\n\n" +
 		"# Заголовок\n\n" +
 		"**Жирный текст**  \n" +
 		"*Курсив*  \n" +
@@ -36,7 +36,6 @@ func TestMarkdownV2ConvertsFailingACPSample(t *testing.T) {
 		"\n  • ",
 		"\n    ‣ ",
 		"\n      ◦ ",
-		"Привет\\\\!",
 	} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("MarkdownV2() = %q, contains unwanted fragment %q", got, unwanted)
@@ -63,6 +62,21 @@ func TestMarkdownV2ConvertsFailingACPSample(t *testing.T) {
 	}
 	if strings.HasPrefix(got, "\n") || strings.HasSuffix(got, "\n") {
 		t.Fatalf("MarkdownV2() = %q, want no leading or trailing newline", got)
+	}
+}
+
+func TestMarkdownV2ToleratesAccidentalPreEscapedPunctuation(t *testing.T) {
+	t.Parallel()
+
+	got, err := MarkdownV2("Привет\\! Use `relay.workspace.import`.")
+	if err != nil {
+		t.Fatalf("MarkdownV2() error = %v", err)
+	}
+	if strings.Contains(got, "Привет\\\\!") {
+		t.Fatalf("MarkdownV2() = %q, want accidental pre-escaped bang normalized", got)
+	}
+	if !strings.Contains(got, "Привет\\!") {
+		t.Fatalf("MarkdownV2() = %q, want Telegram MarkdownV2 escaped bang", got)
 	}
 }
 
