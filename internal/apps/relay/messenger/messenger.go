@@ -1,14 +1,12 @@
 package messenger
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	tgmd "github.com/Mad-Pixels/goldmark-tgmd"
 	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/rs/zerolog"
 	"github.com/tgbotkit/client"
@@ -82,13 +80,12 @@ func (m *Messenger) SendPlain(ctx context.Context, chatID int64, text string, to
 
 // SendMarkdown converts standard Markdown to Telegram MarkdownV2 and sends.
 func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string, topicID int) error {
-	var buf bytes.Buffer
-	md := tgmd.TGMD()
-	if err := md.Convert([]byte(text), &buf); err != nil {
+	payload, err := telegramfmt.MarkdownV2(text)
+	if err != nil {
 		m.logger.Warn().Err(err).Msg("failed to convert markdown to telegram format, falling back to escaped literal")
-		return m.sendMessageWithMode(ctx, chatID, escapeMarkdownV2(text), topicID, "MarkdownV2", "send message with MarkdownV2")
+		payload = telegramfmt.EscapeMarkdownV2(text)
 	}
-	return m.sendMessageWithMode(ctx, chatID, cleanTelegramMarkdownV2Payload(buf.String()), topicID, "MarkdownV2", "send message with MarkdownV2")
+	return m.sendMessageWithMode(ctx, chatID, payload, topicID, "MarkdownV2", "send message with MarkdownV2")
 }
 
 // SendAgentReply sends final model output with relay.telegram.formatting_mode.
@@ -165,43 +162,6 @@ func isTelegramParseEntitiesError(description string) bool {
 	return strings.Contains(desc, "parse entities") && strings.Contains(desc, "entity")
 }
 
-func cleanTelegramMarkdownV2Payload(text string) string {
-	text = strings.Trim(text, "\r\n")
-	if text == "" {
-		return text
-	}
-
-	lines := strings.Split(text, "\n")
-	inFence := false
-	for i, line := range lines {
-		if isMarkdownFenceLine(line) {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "  • "):
-			lines[i] = strings.TrimPrefix(line, "  ")
-		case strings.HasPrefix(line, "    ‣ "):
-			lines[i] = strings.TrimPrefix(line, "  ")
-		case strings.HasPrefix(line, "      ◦ "):
-			lines[i] = strings.TrimPrefix(line, "  ")
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func isMarkdownFenceLine(line string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
-		return false
-	}
-	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-}
-
 // SendChatAction sends a chat action (e.g., "typing").
 func (m *Messenger) SendChatAction(ctx context.Context, chatID int64, topicID int, action string) error {
 	if chatID == 0 {
@@ -248,29 +208,4 @@ func (m *Messenger) KeepTyping(ctx context.Context, chatID int64, topicID int) {
 			}
 		}
 	}
-}
-
-func escapeMarkdownV2(text string) string {
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"]", "\\]",
-		"(", "\\(",
-		")", "\\)",
-		"~", "\\~",
-		"`", "\\`",
-		">", "\\>",
-		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
-		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
-		"\\", "\\\\",
-	)
-	return replacer.Replace(text)
 }
