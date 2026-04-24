@@ -30,15 +30,7 @@ func TestMessageContextFromEvent_PrivateChatIgnoresMessageThreadID(t *testing.T)
 	if !ok {
 		t.Fatal("MessageContextFromEvent() ok = false, want true")
 	}
-	if got.TopicID != 0 {
-		t.Fatalf("topic_id = %d, want 0 for private chat", got.TopicID)
-	}
-	if !got.AllowProgressHints {
-		t.Fatalf("allow_progress_hints = %v, want true for private chat", got.AllowProgressHints)
-	}
-	if got.Locator.SessionID != "tg-2317500-0" {
-		t.Fatalf("session_id = %q, want tg-2317500-0", got.Locator.SessionID)
-	}
+	assertPrivateMessageContext(t, got, 0, "tg-2317500-0")
 }
 
 func TestMessageContextFromEvent_SupergroupPreservesMessageThreadID(t *testing.T) {
@@ -62,8 +54,11 @@ func TestMessageContextFromEvent_SupergroupPreservesMessageThreadID(t *testing.T
 	if got.TopicID != 77 {
 		t.Fatalf("topic_id = %d, want 77 for supergroup topic", got.TopicID)
 	}
-	if got.AllowProgressHints {
-		t.Fatalf("allow_progress_hints = %v, want false for supergroup chat", got.AllowProgressHints)
+	if got.ProgressPolicy.Thinking {
+		t.Fatalf("progress_policy.thinking = %v, want false for supergroup chat", got.ProgressPolicy.Thinking)
+	}
+	if !got.ProgressPolicy.Typing {
+		t.Fatalf("progress_policy.typing = %v, want true for supergroup chat", got.ProgressPolicy.Typing)
 	}
 	if got.Locator.SessionID != "tg--1009001-77" {
 		t.Fatalf("session_id = %q, want tg--1009001-77", got.Locator.SessionID)
@@ -118,14 +113,23 @@ func TestMessageContextFromEvent_PrivateTopicPreservesMessageThreadID(t *testing
 	if !ok {
 		t.Fatal("MessageContextFromEvent() ok = false, want true")
 	}
-	if got.TopicID != 523431 {
-		t.Fatalf("topic_id = %d, want 523431 for private topic message", got.TopicID)
+	assertPrivateMessageContext(t, got, 523431, "tg-2317500-523431")
+}
+
+func assertPrivateMessageContext(t *testing.T, got MessageContext, wantTopicID int, wantSessionID string) {
+	t.Helper()
+
+	if got.TopicID != wantTopicID {
+		t.Fatalf("topic_id = %d, want %d", got.TopicID, wantTopicID)
 	}
-	if !got.AllowProgressHints {
-		t.Fatalf("allow_progress_hints = %v, want true for private topic", got.AllowProgressHints)
+	if !got.ProgressPolicy.Thinking {
+		t.Fatalf("progress_policy.thinking = %v, want true", got.ProgressPolicy.Thinking)
 	}
-	if got.Locator.SessionID != "tg-2317500-523431" {
-		t.Fatalf("session_id = %q, want tg-2317500-523431", got.Locator.SessionID)
+	if !got.ProgressPolicy.Typing {
+		t.Fatalf("progress_policy.typing = %v, want true", got.ProgressPolicy.Typing)
+	}
+	if got.Locator.SessionID != wantSessionID {
+		t.Fatalf("session_id = %q, want %q", got.Locator.SessionID, wantSessionID)
 	}
 }
 
@@ -160,6 +164,9 @@ func TestMessageContextFromEvent_PopulatesReplyMetadataWhenPresent(t *testing.T)
 	if !got.ReplyToIsBot {
 		t.Fatalf("reply_to_is_bot = %v, want true", got.ReplyToIsBot)
 	}
+	if got.ReplyContent != "" {
+		t.Fatalf("reply_content = %q, want empty", got.ReplyContent)
+	}
 }
 
 func TestMessageContextFromEvent_ReplyMetadataEmptyWithoutReply(t *testing.T) {
@@ -185,6 +192,86 @@ func TestMessageContextFromEvent_ReplyMetadataEmptyWithoutReply(t *testing.T) {
 	}
 	if got.ReplyToIsBot {
 		t.Fatalf("reply_to_is_bot = %v, want false", got.ReplyToIsBot)
+	}
+	if got.ReplyContent != "" {
+		t.Fatalf("reply_content = %q, want empty", got.ReplyContent)
+	}
+}
+
+func TestMessageContextFromEvent_PopulatesReplyContentFromReplyText(t *testing.T) {
+	replyText := "quoted message"
+	got, ok := (&Adapter{}).MessageContextFromEvent(&events.MessageEvent{
+		Message: &client.Message{
+			MessageId: 43,
+			Chat: client.Chat{
+				Id:   -1009001,
+				Type: "supergroup",
+			},
+			From: &client.User{Id: 101},
+			Text: textPtr(testMessageText),
+			ReplyToMessage: &client.Message{
+				MessageId: 8,
+				Text:      &replyText,
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("MessageContextFromEvent() ok = false, want true")
+	}
+	if got.ReplyContent != replyText {
+		t.Fatalf("reply_content = %q, want %q", got.ReplyContent, replyText)
+	}
+}
+
+func TestMessageContextFromEvent_UsesReplyCaptionWhenReplyTextMissing(t *testing.T) {
+	replyCaption := "photo caption"
+	got, ok := (&Adapter{}).MessageContextFromEvent(&events.MessageEvent{
+		Message: &client.Message{
+			MessageId: 44,
+			Chat: client.Chat{
+				Id:   -1009001,
+				Type: "supergroup",
+			},
+			From: &client.User{Id: 101},
+			Text: textPtr(testMessageText),
+			ReplyToMessage: &client.Message{
+				MessageId: 9,
+				Caption:   &replyCaption,
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("MessageContextFromEvent() ok = false, want true")
+	}
+	if got.ReplyContent != replyCaption {
+		t.Fatalf("reply_content = %q, want %q", got.ReplyContent, replyCaption)
+	}
+}
+
+func TestMessageContextFromEvent_CopiesEntities(t *testing.T) {
+	entities := []client.MessageEntity{
+		{Type: "mention", Offset: 6, Length: 8},
+	}
+	got, ok := (&Adapter{}).MessageContextFromEvent(&events.MessageEvent{
+		Message: &client.Message{
+			MessageId: 45,
+			Chat: client.Chat{
+				Id:   -1009001,
+				Type: "supergroup",
+			},
+			From:     &client.User{Id: 101},
+			Text:     textPtr("hello @testbot"),
+			Entities: &entities,
+		},
+	})
+	if !ok {
+		t.Fatal("MessageContextFromEvent() ok = false, want true")
+	}
+	if len(got.Entities) != 1 {
+		t.Fatalf("entities len = %d, want 1", len(got.Entities))
+	}
+	if got.Entities[0].Type != "mention" || got.Entities[0].Offset != 6 || got.Entities[0].Length != 8 {
+		t.Fatalf("entity = %+v, want mention offset=6 length=8", got.Entities[0])
 	}
 }
 

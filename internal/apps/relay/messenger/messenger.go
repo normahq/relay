@@ -9,22 +9,30 @@ import (
 	"time"
 
 	tgmd "github.com/Mad-Pixels/goldmark-tgmd"
+	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/rs/zerolog"
 	"github.com/tgbotkit/client"
 )
 
 // Messenger handles all Telegram message sending for the relay.
 type Messenger struct {
-	client client.ClientWithResponsesInterface
-	logger zerolog.Logger
+	client                   client.ClientWithResponsesInterface
+	logger                   zerolog.Logger
+	agentReplyFormattingMode string
 }
 
 // NewMessenger creates a new Messenger.
 func NewMessenger(client client.ClientWithResponsesInterface, logger zerolog.Logger) *Messenger {
 	return &Messenger{
-		client: client,
-		logger: logger.With().Str("component", "relay.messenger").Logger(),
+		client:                   client,
+		logger:                   logger.With().Str("component", "relay.messenger").Logger(),
+		agentReplyFormattingMode: telegramfmt.ModeMarkdownV2,
 	}
+}
+
+// SetAgentReplyFormattingMode sets relay.telegram.formatting_mode for final agent responses.
+func (m *Messenger) SetAgentReplyFormattingMode(mode string) {
+	m.agentReplyFormattingMode = telegramfmt.NormalizeMode(mode)
 }
 
 // SendDraftPlain sends a plain-text draft (no parse_mode).
@@ -83,6 +91,18 @@ func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string,
 	return m.sendMessageWithMode(ctx, chatID, buf.String(), topicID, "MarkdownV2", "send message with MarkdownV2")
 }
 
+// SendAgentReply sends final model output with relay.telegram.formatting_mode.
+func (m *Messenger) SendAgentReply(ctx context.Context, chatID int64, text string, topicID int) error {
+	switch telegramfmt.NormalizeMode(m.agentReplyFormattingMode) {
+	case telegramfmt.ModeHTML:
+		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeHTML), "send message with HTML")
+	case telegramfmt.ModeNone:
+		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeNone), "send message without parse_mode")
+	default:
+		return m.SendMarkdown(ctx, chatID, text, topicID)
+	}
+}
+
 func (m *Messenger) sendMessageWithMode(ctx context.Context, chatID int64, text string, topicID int, mode, logMsg string) error {
 	m.logger.Debug().
 		Int64("chat_id", chatID).
@@ -100,8 +120,12 @@ func (m *Messenger) sendMessageWithMode(ctx context.Context, chatID int64, text 
 		req.MessageThreadId = &topicID
 	}
 	resp, err := m.client.SendMessageWithResponse(ctx, req)
-	if err != nil {
-		m.logger.Warn().Err(err).Int64("chat_id", chatID).Msg(logMsg + " failed, retrying without parse_mode")
+	if shouldRetryWithoutParseMode(mode, resp, err) {
+		retryReason := "transport error"
+		if err == nil && resp != nil && resp.JSON400 != nil {
+			retryReason = "telegram parse error"
+		}
+		m.logger.Warn().Err(err).Int64("chat_id", chatID).Str("retry_reason", retryReason).Msg(logMsg + " failed, retrying without parse_mode")
 		req.ParseMode = nil
 		resp, err = m.client.SendMessageWithResponse(ctx, req)
 		if err != nil {
@@ -115,6 +139,30 @@ func (m *Messenger) sendMessageWithMode(ctx context.Context, chatID int64, text 
 		return fmt.Errorf("%s to chat %d: no response body", logMsg, chatID)
 	}
 	return nil
+}
+
+func shouldRetryWithoutParseMode(mode string, resp *client.SendMessageResponse, err error) bool {
+	if strings.TrimSpace(mode) == "" {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	if resp == nil || resp.JSON400 == nil {
+		return false
+	}
+	return isTelegramParseEntitiesError(resp.JSON400.Description)
+}
+
+func isTelegramParseEntitiesError(description string) bool {
+	desc := strings.ToLower(strings.TrimSpace(description))
+	if desc == "" {
+		return false
+	}
+	if strings.Contains(desc, "can't parse entities") || strings.Contains(desc, "cant parse entities") {
+		return true
+	}
+	return strings.Contains(desc, "parse entities") && strings.Contains(desc, "entity")
 }
 
 // SendChatAction sends a chat action (e.g., "typing").

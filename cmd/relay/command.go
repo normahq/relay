@@ -12,6 +12,7 @@ import (
 
 	"github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/relay/internal/apps/relay"
+	"github.com/normahq/relay/internal/apps/relay/shutdown"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -28,9 +29,10 @@ type relayConfigDocument struct {
 
 func startCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Start Telegram relay bot",
-		Long:  "Start the Telegram relay bot server.",
+		Use:          "start",
+		Short:        "Start Telegram relay bot",
+		Long:         "Start the Telegram relay bot server.",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			workingDir, err := os.Getwd()
 			if err != nil {
@@ -99,6 +101,9 @@ func startCommand() *cobra.Command {
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer shutdownCancel()
 			if err := app.Stop(shutdownCtx); err != nil {
+				if shutdown.IsExpected(err) {
+					return nil
+				}
 				return fmt.Errorf("stopping relay app: %w", err)
 			}
 

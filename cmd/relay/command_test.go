@@ -163,6 +163,13 @@ func TestNewRootCommand_RegistersCommandsAndFlags(t *testing.T) {
 	}
 }
 
+func TestStartCommandSilencesUsageForRuntimeErrors(t *testing.T) {
+	cmd := startCommand()
+	if !cmd.SilenceUsage {
+		t.Fatal("startCommand().SilenceUsage = false, want true")
+	}
+}
+
 func writeFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

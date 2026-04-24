@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	relaychannel "github.com/normahq/relay/internal/apps/relay/channel"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
 	relaysession "github.com/normahq/relay/internal/apps/relay/session"
 	"github.com/rs/zerolog"
@@ -24,18 +25,20 @@ type Adapter struct {
 
 // MessageContext is the relay-facing Telegram message shape.
 type MessageContext struct {
-	Locator            relaysession.SessionLocator
-	ChatID             int64
-	TopicID            int
-	MessageID          int
-	UserID             int64
-	IsReply            bool
-	ReplyToUserID      int64
-	ReplyToIsBot       bool
-	Text               string
-	HasCommand         bool
-	AllowProgressHints bool
-	IsDM               bool
+	Locator        relaysession.SessionLocator
+	ChatID         int64
+	TopicID        int
+	MessageID      int
+	UserID         int64
+	Entities       []client.MessageEntity
+	IsReply        bool
+	ReplyToUserID  int64
+	ReplyToIsBot   bool
+	ReplyContent   string
+	Text           string
+	HasCommand     bool
+	ProgressPolicy relaychannel.ProgressPolicy
+	IsDM           bool
 }
 
 // CommandContext is the relay-facing Telegram command shape.
@@ -93,27 +96,44 @@ func (a *Adapter) MessageContextFromEvent(event *events.MessageEvent) (MessageCo
 	if event.Message.Text != nil {
 		text = *event.Message.Text
 	}
+	var entities []client.MessageEntity
+	if event.Message.Entities != nil {
+		entities = append(entities, (*event.Message.Entities)...)
+	}
 	isReply := event.Message.ReplyToMessage != nil
 	replyToUserID := int64(0)
 	replyToIsBot := false
+	replyContent := ""
 	if event.Message.ReplyToMessage != nil && event.Message.ReplyToMessage.From != nil {
 		replyToUserID = event.Message.ReplyToMessage.From.Id
 		replyToIsBot = event.Message.ReplyToMessage.From.IsBot
 	}
+	if event.Message.ReplyToMessage != nil {
+		if event.Message.ReplyToMessage.Text != nil {
+			replyContent = *event.Message.ReplyToMessage.Text
+		} else if event.Message.ReplyToMessage.Caption != nil {
+			replyContent = *event.Message.ReplyToMessage.Caption
+		}
+	}
 
 	return MessageContext{
-		Locator:            relaysession.NewTelegramSessionLocator(event.Message.Chat.Id, topicID),
-		ChatID:             event.Message.Chat.Id,
-		TopicID:            topicID,
-		MessageID:          event.Message.MessageId,
-		UserID:             event.Message.From.Id,
-		IsReply:            isReply,
-		ReplyToUserID:      replyToUserID,
-		ReplyToIsBot:       replyToIsBot,
-		Text:               text,
-		HasCommand:         hasCommandEntity(event.Message),
-		AllowProgressHints: event.Message.Chat.Type == chatTypePrivate,
-		IsDM:               event.Message.Chat.Type == chatTypePrivate,
+		Locator:       relaysession.NewTelegramSessionLocator(event.Message.Chat.Id, topicID),
+		ChatID:        event.Message.Chat.Id,
+		TopicID:       topicID,
+		MessageID:     event.Message.MessageId,
+		UserID:        event.Message.From.Id,
+		Entities:      entities,
+		IsReply:       isReply,
+		ReplyToUserID: replyToUserID,
+		ReplyToIsBot:  replyToIsBot,
+		ReplyContent:  replyContent,
+		Text:          text,
+		HasCommand:    hasCommandEntity(event.Message),
+		ProgressPolicy: relaychannel.ProgressPolicy{
+			Typing:   true,
+			Thinking: event.Message.Chat.Type == chatTypePrivate,
+		},
+		IsDM: event.Message.Chat.Type == chatTypePrivate,
 	}, true
 }
 
@@ -181,6 +201,15 @@ func (a *Adapter) SendMarkdown(ctx context.Context, locator relaysession.Session
 		return err
 	}
 	return a.messenger.SendMarkdown(ctx, chatID, text, topicID)
+}
+
+// SendAgentReply sends final agent output for the locator using configured formatting mode.
+func (a *Adapter) SendAgentReply(ctx context.Context, locator relaysession.SessionLocator, text string) error {
+	chatID, topicID, err := telegramTuple(locator)
+	if err != nil {
+		return err
+	}
+	return a.messenger.SendAgentReply(ctx, chatID, text, topicID)
 }
 
 // SendDraftPlain updates a draft message for the locator.

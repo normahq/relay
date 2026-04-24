@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/normahq/relay/internal/apps/relay/shutdown"
 	"github.com/rs/zerolog"
 	"go.uber.org/fx"
 )
@@ -127,11 +128,18 @@ func closeBuiltRuntime(runtime *BuiltRuntime) error {
 	if runtime == nil {
 		return nil
 	}
-	closer, ok := runtime.Agent.(io.Closer)
+	return closeRuntimeAgent(runtime.Agent)
+}
+
+func closeRuntimeAgent(agent any) error {
+	closer, ok := agent.(io.Closer)
 	if !ok {
 		return nil
 	}
 	if err := closer.Close(); err != nil {
+		if shutdown.IsExpected(err) {
+			return nil
+		}
 		return fmt.Errorf("close relay provider runtime agent: %w", err)
 	}
 	return nil

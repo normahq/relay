@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/normahq/relay/internal/apps/relay/auth"
+	relaychannel "github.com/normahq/relay/internal/apps/relay/channel"
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
 	relaysession "github.com/normahq/relay/internal/apps/relay/session"
@@ -304,20 +304,40 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 			if ts != nil {
 				relayProviderID := h.getProviderName()
 				metadata := h.sessionManager.GetAgentMetadata(relayProviderID)
-				welcomeMsg := BuildAgentWelcomeMessage(ts.GetAgentName(), ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
+				welcomeName := h.welcomeDisplayName(messageCtx, ts)
+				welcomeMsg := BuildAgentWelcomeMessage(welcomeName, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 			}
 		}
 	}
 
 	if h.turnDispatcher == nil {
-		if err := h.runTurnTask(ctx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), ts.GetAgentSessionID(), locator, messageCtx.MessageID, topicID, messageCtx.AllowProgressHints); err != nil {
+		if err := h.runTurnTask(
+			ctx,
+			text,
+			ts.GetRunner(),
+			ts.GetUserID(),
+			ts.GetSessionID(),
+			ts.GetAgentSessionID(),
+			locator,
+			messageCtx.MessageID,
+			topicID,
+			messageCtx.ProgressPolicy,
+		); err != nil {
 			log.Error().Err(err).Int("topic_id", topicID).Msg("Agent execution failed")
 		}
 		return nil
 	}
 
-	if err := h.enqueueTurn(ctx, text, ts, locator, messageCtx.MessageID, topicID, messageCtx.AllowProgressHints); err != nil {
+	if err := h.enqueueTurn(
+		ctx,
+		text,
+		ts,
+		locator,
+		messageCtx.MessageID,
+		topicID,
+		messageCtx.ProgressPolicy,
+	); err != nil {
 		if errors.Is(err, ErrTurnQueueFull) {
 			_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Session is busy and queue is full (%d). Please wait or use /cancel.", perSessionQueueLimit))
 			return nil
@@ -337,7 +357,7 @@ func (h *RelayHandler) enqueueTurn(
 	locator relaysession.SessionLocator,
 	messageID int,
 	topicID int,
-	allowProgressHints bool,
+	progressPolicy relaychannel.ProgressPolicy,
 ) error {
 	if ts == nil {
 		return fmt.Errorf("topic session is required")
@@ -353,7 +373,18 @@ func (h *RelayHandler) enqueueTurn(
 					Msg("dropping queued turn for inactive session")
 				return nil
 			}
-			return h.runTurnTask(runCtx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), ts.GetAgentSessionID(), locator, messageID, topicID, allowProgressHints)
+			return h.runTurnTask(
+				runCtx,
+				text,
+				ts.GetRunner(),
+				ts.GetUserID(),
+				ts.GetSessionID(),
+				ts.GetAgentSessionID(),
+				locator,
+				messageID,
+				topicID,
+				progressPolicy,
+			)
 		},
 	})
 	if err != nil {
@@ -384,9 +415,9 @@ func (h *RelayHandler) runTurnTask(
 	locator relaysession.SessionLocator,
 	messageID int,
 	topicID int,
-	allowProgressHints bool,
+	progressPolicy relaychannel.ProgressPolicy,
 ) error {
-	err := h.runTurn(ctx, text, r, userID, sessionID, agentSessionID, locator, messageID, allowProgressHints)
+	err := h.runTurn(ctx, text, r, userID, sessionID, agentSessionID, locator, messageID, progressPolicy)
 	if err == nil {
 		return nil
 	}
@@ -471,7 +502,7 @@ func (h *RelayHandler) runTurn(
 	agentSessionID string,
 	locator relaysession.SessionLocator,
 	messageID int,
-	allowProgressHints bool,
+	progressPolicy relaychannel.ProgressPolicy,
 ) error {
 	if strings.TrimSpace(agentSessionID) == "" {
 		agentSessionID = sessionID
@@ -499,7 +530,13 @@ func (h *RelayHandler) runTurn(
 		Logger().
 		WithContext(ctx)
 
-	var result strings.Builder
+	lastFinalResponseText := ""
+	lastNonPartialText := ""
+	lastPartialText := ""
+	hasFinalCandidate := false
+	hasFallbackCandidate := false
+	hasPartialCandidate := false
+	sawTurnComplete := false
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
 
@@ -510,37 +547,164 @@ func (h *RelayHandler) runTurn(
 		if ev == nil {
 			continue
 		}
+		if !ev.TurnComplete {
+			if progressPolicy.Typing {
+				if sendErr := h.channel.SendTyping(ctx, locator); sendErr != nil {
+					log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send typing chat action")
+				}
+			}
+			if progressPolicy.Thinking {
+				if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
+					log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send thinking draft")
+				}
+				thinkingIdx++
+			}
+		}
+		contentRole := ""
+		partCount := 0
+		thoughtPartCount := 0
+		textPartCount := 0
+		textCharCount := 0
+		functionCallPartCount := 0
+		functionResponsePartCount := 0
+		executableCodePartCount := 0
+		codeExecutionResultPartCount := 0
+		fileDataPartCount := 0
+		inlineDataPartCount := 0
+		var eventTextBuilder strings.Builder
 		if ev.Content != nil {
+			contentRole = ev.Content.Role
+			partCount = len(ev.Content.Parts)
 			for _, part := range ev.Content.Parts {
 				if part == nil {
 					continue
 				}
 				if part.Thought {
-					if allowProgressHints {
-						if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
-							log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send thinking draft")
-						}
-						if sendErr := h.channel.SendTyping(ctx, locator); sendErr != nil {
-							log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send typing chat action")
-						}
-					}
-					thinkingIdx++
+					thoughtPartCount++
 					continue
 				}
 				if part.Text != "" {
-					result.WriteString(part.Text)
+					textPartCount++
+					textCharCount += len(part.Text)
+					eventTextBuilder.WriteString(part.Text)
+				}
+				if part.FunctionCall != nil {
+					functionCallPartCount++
+				}
+				if part.FunctionResponse != nil {
+					functionResponsePartCount++
+				}
+				if part.ExecutableCode != nil {
+					executableCodePartCount++
+				}
+				if part.CodeExecutionResult != nil {
+					codeExecutionResultPartCount++
+				}
+				if part.FileData != nil {
+					fileDataPartCount++
+				}
+				if part.InlineData != nil {
+					inlineDataPartCount++
 				}
 			}
 		}
+		eventText := eventTextBuilder.String()
+		if strings.TrimSpace(eventText) != "" {
+			if ev.Partial {
+				switch {
+				case !hasPartialCandidate:
+					lastPartialText = eventText
+				case strings.HasPrefix(eventText, lastPartialText):
+					// Handle cumulative partial streams by replacing the prior snapshot.
+					lastPartialText = eventText
+				case strings.HasPrefix(lastPartialText, eventText):
+					// Ignore shorter duplicate snapshots.
+				default:
+					// Handle delta partial streams by appending incoming text.
+					lastPartialText += eventText
+				}
+				hasPartialCandidate = strings.TrimSpace(lastPartialText) != ""
+			}
+			if !ev.Partial {
+				lastNonPartialText = eventText
+				hasFallbackCandidate = true
+			}
+			if ev.IsFinalResponse() {
+				lastFinalResponseText = eventText
+				hasFinalCandidate = true
+			}
+		}
+		zerolog.Ctx(runCtx).Debug().
+			Str("event_id", ev.ID).
+			Str("event_invocation_id", ev.InvocationID).
+			Str("event_author", ev.Author).
+			Str("event_branch", ev.Branch).
+			Bool("partial", ev.Partial).
+			Bool("interrupted", ev.Interrupted).
+			Bool("turn_complete", ev.TurnComplete).
+			Bool("has_content", ev.Content != nil).
+			Str("content_role", contentRole).
+			Int("part_count", partCount).
+			Int("thought_part_count", thoughtPartCount).
+			Int("text_part_count", textPartCount).
+			Int("text_char_count", textCharCount).
+			Int("function_call_part_count", functionCallPartCount).
+			Int("function_response_part_count", functionResponsePartCount).
+			Int("executable_code_part_count", executableCodePartCount).
+			Int("code_execution_result_part_count", codeExecutionResultPartCount).
+			Int("file_data_part_count", fileDataPartCount).
+			Int("inline_data_part_count", inlineDataPartCount).
+			Str("error_code", strings.TrimSpace(ev.ErrorCode)).
+			Bool("has_error_message", strings.TrimSpace(ev.ErrorMessage) != "").
+			Interface("finish_reason", ev.FinishReason).
+			Int("long_running_tool_ids_count", len(ev.LongRunningToolIDs)).
+			Int("state_delta_count", len(ev.Actions.StateDelta)).
+			Int("artifact_delta_count", len(ev.Actions.ArtifactDelta)).
+			Int("requested_tool_confirmations_count", len(ev.Actions.RequestedToolConfirmations)).
+			Bool("skip_summarization", ev.Actions.SkipSummarization).
+			Str("transfer_to_agent", strings.TrimSpace(ev.Actions.TransferToAgent)).
+			Bool("escalate", ev.Actions.Escalate).
+			Bool("final_candidate_present", hasFinalCandidate).
+			Bool("fallback_candidate_present", hasFallbackCandidate).
+			Bool("partial_candidate_present", hasPartialCandidate).
+			Int("partial_candidate_char_count", len(lastPartialText)).
+			Msg("received ACP event")
 		if ev.TurnComplete {
+			sawTurnComplete = true
+			responseText := ""
+			responseSource := "none"
+			switch {
+			case hasFinalCandidate:
+				responseText = lastFinalResponseText
+				responseSource = "final_response"
+			case hasFallbackCandidate:
+				responseText = lastNonPartialText
+				responseSource = "non_partial_fallback"
+			case hasPartialCandidate:
+				responseText = lastPartialText
+				responseSource = "partial_text_fallback"
+			}
+			responseEmitted := false
+			if strings.TrimSpace(responseText) != "" {
+				if sendErr := h.channel.SendAgentReply(ctx, locator, responseText); sendErr != nil {
+					log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send relay response")
+				} else {
+					responseEmitted = true
+				}
+			}
+			zerolog.Ctx(runCtx).Debug().
+				Str("response_source", responseSource).
+				Bool("response_emitted_on_turn_complete", responseEmitted).
+				Msg("processed turn complete event")
 			break
 		}
 	}
-
-	if s := result.String(); strings.TrimSpace(s) != "" {
-		if sendErr := h.channel.SendMarkdown(ctx, locator, s); sendErr != nil {
-			log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send relay response")
-		}
+	if !sawTurnComplete {
+		zerolog.Ctx(runCtx).Warn().
+			Bool("final_candidate_present", hasFinalCandidate).
+			Bool("fallback_candidate_present", hasFallbackCandidate).
+			Bool("partial_candidate_present", hasPartialCandidate).
+			Msg("ACP stream ended without turn complete; suppressing relay response")
 	}
 
 	return nil
@@ -656,15 +820,25 @@ func (h *RelayHandler) getProviderName() string {
 	return providerName
 }
 
+func (h *RelayHandler) welcomeDisplayName(messageCtx relaytelegram.MessageContext, ts *relaysession.TopicSession) string {
+	if !messageCtx.IsDM && messageCtx.TopicID > 0 {
+		return rootSessionLabel
+	}
+	if ts == nil {
+		return ""
+	}
+	return ts.GetAgentName()
+}
+
 func (h *RelayHandler) normalizePublicText(messageCtx relaytelegram.MessageContext) (string, bool) {
 	botUserID, botUsername := h.getBotIdentity()
 
 	if botUsername != "" {
-		mentionPrefix := "@" + botUsername
-		if hasBotMentionPrefix(messageCtx.Text, mentionPrefix) {
-			text := strings.TrimPrefix(messageCtx.Text, mentionPrefix)
-			text = strings.TrimLeftFunc(text, unicode.IsSpace)
-			return text, strings.TrimSpace(text) != ""
+		mentionRanges := botMentionEntityRanges(messageCtx.Text, messageCtx.Entities, botUsername)
+		if len(mentionRanges) > 0 {
+			userMessage := strings.TrimSpace(removeTextByUTF16Ranges(messageCtx.Text, mentionRanges))
+			replyContent := strings.TrimSpace(messageCtx.ReplyContent)
+			return composeMentionTriggeredInput(userMessage, replyContent)
 		}
 	}
 
@@ -679,24 +853,155 @@ func (h *RelayHandler) normalizePublicText(messageCtx relaytelegram.MessageConte
 	return messageCtx.Text, true
 }
 
+func composeMentionTriggeredInput(userMessage, replyContent string) (string, bool) {
+	switch {
+	case replyContent != "" && userMessage != "":
+		return fmt.Sprintf("Reply context:\n%s\n\nUser message:\n%s", replyContent, userMessage), true
+	case replyContent != "":
+		return fmt.Sprintf("Reply context:\n%s", replyContent), true
+	case userMessage != "":
+		return userMessage, true
+	default:
+		return "", false
+	}
+}
+
 func (h *RelayHandler) getBotIdentity() (int64, string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.botUserID, h.botUsername
 }
 
-func hasBotMentionPrefix(text, mentionPrefix string) bool {
-	if !strings.HasPrefix(text, mentionPrefix) {
-		return false
-	}
-	if len(text) == len(mentionPrefix) {
-		return true
-	}
-
-	next, _ := utf8.DecodeRuneInString(text[len(mentionPrefix):])
-	return isMentionBoundary(next)
+type utf16Range struct {
+	start int
+	end   int
 }
 
-func isMentionBoundary(r rune) bool {
-	return unicode.IsSpace(r) || (unicode.IsPunct(r) && r != '_')
+func botMentionEntityRanges(text string, entities []client.MessageEntity, botUsername string) []utf16Range {
+	trimmedUsername := strings.TrimSpace(botUsername)
+	if trimmedUsername == "" || len(entities) == 0 || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	expectedMention := "@" + trimmedUsername
+	ranges := make([]utf16Range, 0, len(entities))
+	for _, entity := range entities {
+		if entity.Type != "mention" {
+			continue
+		}
+		if entity.Length <= 0 || entity.Offset < 0 {
+			continue
+		}
+		mentionText, ok := utf16TextSlice(text, entity.Offset, entity.Length)
+		if !ok {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(mentionText), expectedMention) {
+			continue
+		}
+		ranges = append(ranges, utf16Range{
+			start: entity.Offset,
+			end:   entity.Offset + entity.Length,
+		})
+	}
+	return ranges
+}
+
+func removeTextByUTF16Ranges(text string, ranges []utf16Range) string {
+	if len(ranges) == 0 || text == "" {
+		return text
+	}
+	runes := []rune(text)
+	type runeRange struct {
+		start int
+		end   int
+	}
+	runeRanges := make([]runeRange, 0, len(ranges))
+	for _, r := range ranges {
+		start, ok := utf16OffsetToRuneIndex(runes, r.start)
+		if !ok {
+			continue
+		}
+		end, ok := utf16OffsetToRuneIndex(runes, r.end)
+		if !ok || end <= start {
+			continue
+		}
+		runeRanges = append(runeRanges, runeRange{start: start, end: end})
+	}
+	if len(runeRanges) == 0 {
+		return text
+	}
+	sort.Slice(runeRanges, func(i, j int) bool {
+		if runeRanges[i].start == runeRanges[j].start {
+			return runeRanges[i].end < runeRanges[j].end
+		}
+		return runeRanges[i].start < runeRanges[j].start
+	})
+	merged := make([]runeRange, 0, len(runeRanges))
+	for _, rr := range runeRanges {
+		if len(merged) == 0 {
+			merged = append(merged, rr)
+			continue
+		}
+		last := &merged[len(merged)-1]
+		if rr.start > last.end {
+			merged = append(merged, rr)
+			continue
+		}
+		if rr.end > last.end {
+			last.end = rr.end
+		}
+	}
+
+	var out strings.Builder
+	prevEnd := 0
+	for _, rr := range merged {
+		if rr.start > prevEnd {
+			out.WriteString(string(runes[prevEnd:rr.start]))
+		}
+		prevEnd = rr.end
+	}
+	if prevEnd < len(runes) {
+		out.WriteString(string(runes[prevEnd:]))
+	}
+	return out.String()
+}
+
+func utf16TextSlice(text string, offset, length int) (string, bool) {
+	if length <= 0 || offset < 0 {
+		return "", false
+	}
+	runes := []rune(text)
+	start, ok := utf16OffsetToRuneIndex(runes, offset)
+	if !ok {
+		return "", false
+	}
+	end, ok := utf16OffsetToRuneIndex(runes, offset+length)
+	if !ok || end < start {
+		return "", false
+	}
+	return string(runes[start:end]), true
+}
+
+func utf16OffsetToRuneIndex(runes []rune, targetOffset int) (int, bool) {
+	if targetOffset < 0 {
+		return 0, false
+	}
+	units := 0
+	for idx, r := range runes {
+		if units == targetOffset {
+			return idx, true
+		}
+		units += utf16UnitsForRune(r)
+	}
+	if units == targetOffset {
+		return len(runes), true
+	}
+	return 0, false
+}
+
+func utf16UnitsForRune(r rune) int {
+	if r > 0xFFFF {
+		return 2
+	}
+	return 1
 }

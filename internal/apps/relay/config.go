@@ -19,8 +19,9 @@ type RelayConfig struct {
 
 // TelegramConfig holds the Telegram bot configuration.
 type TelegramConfig struct {
-	Token   string        `mapstructure:"token"`
-	Webhook WebhookConfig `mapstructure:"webhook"`
+	Token          string        `mapstructure:"token"`
+	FormattingMode string        `mapstructure:"formatting_mode"`
+	Webhook        WebhookConfig `mapstructure:"webhook"`
 }
 
 // WebhookConfig holds Telegram webhook receiver settings.

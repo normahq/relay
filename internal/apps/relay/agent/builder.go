@@ -16,6 +16,7 @@ import (
 	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/norma/pkg/runtime/sessionstate"
+	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/normahq/relay/internal/git"
 	"go.uber.org/fx"
 	"google.golang.org/adk/agent"
@@ -38,6 +39,7 @@ type Builder struct {
 	workspaceEnabled       bool
 	workspaceBaseBranch    string
 	relayGlobalInstruction string
+	telegramFormattingMode string
 }
 
 type sessionStateFactory interface {
@@ -54,6 +56,9 @@ type relayPromptData struct {
 	WorkspaceMode     string
 	BaseBranch        string
 	RepoBranchAtStart string
+	FormattingMode    string
+	FormattingRule    string
+	FormattingExample string
 	GlobalInstruction string
 	Instruction       string
 }
@@ -102,6 +107,11 @@ func (b *Builder) buildRelayInstruction(
 		BaseBranch:        baseBranch,
 		RepoBranchAtStart: repoBranch,
 	}
+	mode := telegramfmt.NormalizeMode(b.telegramFormattingMode)
+	rule, example := telegramfmt.PromptRuleAndExample(mode)
+	data.FormattingMode = mode
+	data.FormattingRule = rule
+	data.FormattingExample = example
 
 	agentInstruction := ""
 	if agentCfg, ok := b.normaCfg.Providers[normalizedAgentName]; ok {
@@ -135,6 +145,7 @@ type BuilderParams struct {
 	WorkspaceEnabled       bool   `name:"relay_workspace_enabled"`
 	WorkspaceBaseBranch    string `name:"relay_workspace_base_branch"`
 	RelayGlobalInstruction string `name:"relay_global_instruction"`
+	TelegramFormattingMode string `name:"relay_telegram_formatting_mode"`
 }
 
 // NewBuilder creates a Builder with the given factory and config.
@@ -146,6 +157,7 @@ func NewBuilder(params BuilderParams) *Builder {
 		workspaceEnabled:       params.WorkspaceEnabled,
 		workspaceBaseBranch:    strings.TrimSpace(params.WorkspaceBaseBranch),
 		relayGlobalInstruction: strings.TrimSpace(params.RelayGlobalInstruction),
+		telegramFormattingMode: telegramfmt.NormalizeMode(params.TelegramFormattingMode),
 	}
 }
 

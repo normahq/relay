@@ -194,6 +194,59 @@ func TestBuildRelayInstruction_IncludesDirectModeSettingsWhenWorkspaceDisabled(t
 	}
 }
 
+func TestBuildRelayInstruction_IncludesFormattingGuidance_DefaultMarkdownV2(t *testing.T) {
+	t.Parallel()
+
+	builder := &Builder{}
+	got := builder.buildRelayInstruction(
+		"tg-1-2",
+		"telegram",
+		"alpha",
+		"norma/relay/tg-1-2",
+		"/tmp/work",
+		"main",
+	)
+
+	wantSnippets := []string{
+		"Telegram formatting mode: `markdownv2`.",
+		"Use Telegram MarkdownV2 parse mode. Escape these reserved characters with backslash when needed: _ * [ ] ( ) ~ ` > # + - = | { } . !",
+		"Example output: *Build:* success. Run `relay start`.",
+	}
+	for _, snippet := range wantSnippets {
+		if !strings.Contains(got, snippet) {
+			t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", snippet, got)
+		}
+	}
+	if strings.Contains(got, "core.telegram.org/bots/api#formatting-options") {
+		t.Fatalf("buildRelayInstruction() unexpectedly contains docs URL:\n%s", got)
+	}
+}
+
+func TestBuildRelayInstruction_IncludesFormattingGuidance_HTML(t *testing.T) {
+	t.Parallel()
+
+	builder := &Builder{telegramFormattingMode: "html"}
+	got := builder.buildRelayInstruction(
+		"tg-1-2",
+		"telegram",
+		"alpha",
+		"norma/relay/tg-1-2",
+		"/tmp/work",
+		"main",
+	)
+
+	wantSnippets := []string{
+		"Telegram formatting mode: `html`.",
+		"Use Telegram HTML parse mode. Supported tags: b/strong, i/em, u/ins, s/strike/del, tg-spoiler or span class=\"tg-spoiler\", a, code, pre, blockquote, tg-emoji, tg-time. Escape raw <, >, & as entities.",
+		"Example output: <b>Build:</b> success. Run <code>relay start</code>.",
+	}
+	for _, snippet := range wantSnippets {
+		if !strings.Contains(got, snippet) {
+			t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", snippet, got)
+		}
+	}
+}
+
 func TestCreateRuntimeSession_IncludesCanonicalCWDState(t *testing.T) {
 	t.Parallel()
 

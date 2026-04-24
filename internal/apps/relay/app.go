@@ -2,7 +2,6 @@ package relay
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +16,9 @@ import (
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	"github.com/normahq/relay/internal/apps/relay/handlers"
+	"github.com/normahq/relay/internal/apps/relay/shutdown"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
+	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/normahq/relay/internal/apps/relay/tgbotkit"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
 	"github.com/normahq/relay/internal/git"
@@ -81,6 +82,10 @@ func Module(
 	}
 	configPath := relayConfigPath(workingDir)
 	if err := validateRelayMCPConfiguration(cfg, normaCfg, configPath); err != nil {
+		return fx.Module("relay", fx.Error(err))
+	}
+	formattingMode, err := validateTelegramFormattingMode(cfg.Relay.Telegram.FormattingMode)
+	if err != nil {
 		return fx.Module("relay", fx.Error(err))
 	}
 	stateDir, err := resolveStateDir(workingDir, cfg.Relay.StateDir)
@@ -198,6 +203,14 @@ func Module(
 					return strings.TrimSpace(cfg.Relay.GlobalInstruction)
 				},
 				fx.ResultTags(`name:"relay_global_instruction"`),
+			),
+		),
+		fx.Provide(
+			fx.Annotate(
+				func() string {
+					return formattingMode
+				},
+				fx.ResultTags(`name:"relay_telegram_formatting_mode"`),
 			),
 		),
 		fx.Provide(
@@ -354,10 +367,7 @@ func resolveWorkingDir(raw string) (string, error) {
 }
 
 func isExpectedBotRunShutdown(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, context.Canceled)
+	return shutdown.IsExpected(err)
 }
 
 func resolveStateDir(workingDir, raw string) (string, error) {
@@ -466,4 +476,12 @@ func sortedMCPServerIDs(servers map[string]agentconfig.MCPServerConfig) []string
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func validateTelegramFormattingMode(raw string) (string, error) {
+	mode, err := telegramfmt.ValidateMode(raw)
+	if err != nil {
+		return "", err
+	}
+	return mode, nil
 }

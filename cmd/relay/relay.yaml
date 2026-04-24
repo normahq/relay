@@ -10,6 +10,11 @@ relay:
     # Telegram bot token (required)
     # Set via RELAY_TELEGRAM_TOKEN env var
     token: ""
+    # Formatting mode for final agent replies:
+    # - markdownv2: convert markdown to Telegram MarkdownV2 (default)
+    # - html: send text with Telegram HTML parse mode
+    # - none: send plain text without parse_mode
+    formatting_mode: "markdownv2"
 
     # Optional webhook configuration
     webhook:

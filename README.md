@@ -66,6 +66,7 @@ relay:
   provider: ""
   telegram:
     token: ""
+    formatting_mode: "markdownv2" # markdownv2 | html | none
   workspace:
     mode: "auto"
     base_branch: ""

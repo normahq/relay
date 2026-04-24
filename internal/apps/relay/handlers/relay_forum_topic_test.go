@@ -212,6 +212,7 @@ func TestRelayHandlerOnMessage_ChannelMentionBypassesGate(t *testing.T) {
 	handler, turns, locator := newRelayMessageHandlerHarness(t, 0)
 
 	text := "@testbot hello world"
+	entities := []client.MessageEntity{{Type: "mention", Offset: 0, Length: len("@testbot")}}
 	event := &events.MessageEvent{
 		Type: messagetype.Text,
 		Message: &client.Message{
@@ -219,8 +220,9 @@ func TestRelayHandlerOnMessage_ChannelMentionBypassesGate(t *testing.T) {
 				Id:   9001,
 				Type: "supergroup",
 			},
-			Text: &text,
-			From: &client.User{Id: 101},
+			Text:     &text,
+			Entities: &entities,
+			From:     &client.User{Id: 101},
 		},
 	}
 

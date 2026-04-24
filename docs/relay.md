@@ -10,8 +10,8 @@
 - Subagents: one session per Telegram topic (`message_thread_id`) with dedicated git worktree.
 - Relay startup prompt includes workspace settings for each session; in git workspace mode it also includes session/base/current-branch context and workspace MCP guidance.
 - Output streaming:
-  - Thought updates: Telegram Bot API `sendMessageDraft` (plain text).
-  - Final assistant response: Telegram Bot API `sendMessage` (MarkdownV2; retry without `parse_mode` on failure).
+  - Progress updates: non-terminal ADK events emit channel progress. Telegram maps this to Bot API `sendChatAction` with `typing` for all chats, plus DM-only `sendMessageDraft` thinking placeholders.
+  - Final assistant response: Telegram Bot API `sendMessage` with `relay.telegram.formatting_mode` (`markdownv2|html|none`; default `markdownv2`).
 - Auth model: one-time owner authorization with startup-generated token.
 
 ## Package Dependencies
@@ -98,6 +98,7 @@ Example `.env`:
 
 ```dotenv
 RELAY_TELEGRAM_TOKEN=123456:ABCDEF
+RELAY_TELEGRAM_FORMATTING_MODE=markdownv2
 RELAY_TELEGRAM_WEBHOOK_ENABLED=true
 RELAY_TELEGRAM_WEBHOOK_URL=https://example.com/telegram/webhook
 ```
@@ -114,6 +115,7 @@ relay:
   provider: <provider_id>
   telegram:
     token: ""
+    formatting_mode: "markdownv2"
 profiles:
   <profile>:
     relay:
@@ -200,6 +202,12 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
     - CWD `.env` as `RELAY_TELEGRAM_TOKEN` (default)
     - relay config file key `relay.telegram.token`
   - when `.env` storage is selected, existing `.env` content is preserved and `RELAY_TELEGRAM_TOKEN` is upserted
+- `relay.telegram.formatting_mode`: final assistant response format mode.
+  - allowed values: `markdownv2`, `html`, `none`
+  - default: `markdownv2`
+  - formatting syntax follows Telegram Bot API formatting options: <https://core.telegram.org/bots/api#formatting-options>
+  - `none` omits Telegram `parse_mode`
+  - invalid values fail startup
 - `relay.telegram.webhook.enabled`: enable local HTTP webhook endpoint (`true` => webhook mode, `false` => polling mode; default: `false`)
 - `relay.telegram.webhook.url`: outgoing Telegram webhook URL (required when `relay.telegram.webhook.enabled=true`)
 - `relay.telegram.webhook.auth_token`: optional webhook auth token
@@ -253,20 +261,24 @@ Relay lazy-restores a topic session on first message after restart when metadata
 ## Message Flow
 
 1. User sends Telegram message.
-   - In non-DM chats (groups/supergroups/topics), relay processes a message only when it starts with `@<bot_username>` or is a reply to this bot's message.
+   - In non-DM chats (groups/supergroups/topics), relay processes a message when it contains a mention entity for `@<bot_username>` or is a reply to this bot's message.
+   - For mention-triggered messages that are replies, relay forwards replied message `text` (fallback `caption`) as model context.
    - In DM chats, relay processes non-command text messages normally.
 2. Relay resolves session by `(chat_id, topic_id)`.
 3. If topic session is missing in memory, relay attempts lazy restore from persisted metadata.
 4. Relay calls ADK runner for that session.
-5. Relay streams partial updates to Telegram using Bot API `sendMessageDraft`.
+5. Relay streams non-terminal ADK event progress to Telegram via chat actions (and DM thinking draft updates).
 
 ## Telegram Messaging Behavior
 
 Per model turn:
 
-1. Thought events are emitted as plain `sendMessageDraft` updates using a stable `draft_id`; relay also sends `sendChatAction` with `typing` for the same chat/topic.
-2. Final assistant text is sent with `sendMessage` using MarkdownV2.
-3. If MarkdownV2 delivery fails, relay retries once without `parse_mode`.
+1. Non-terminal ADK events send `sendChatAction` with `typing` for the same chat/topic; DM chats also emit plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
+2. Final assistant text is sent with `sendMessage` using `relay.telegram.formatting_mode`:
+   - `markdownv2`: convert Markdown to Telegram MarkdownV2 and send with `parse_mode=MarkdownV2`.
+   - `html`: send text with `parse_mode=HTML`.
+   - `none`: send text without `parse_mode`.
+3. If send fails at transport level, or Telegram returns parse/escaping API errors (for example `can't parse entities`), relay retries once without `parse_mode`.
 
 ## Topic Sessions
 
@@ -289,6 +301,7 @@ Relay runs with a single provider per process (`relay.provider`).
 - Relay restores persisted topic metadata on first message after restart.
 - Persisted session label is reused as-is for restore; if missing, relay falls back to label `auto`.
 - If no persisted topic metadata exists, relay creates a new topic session using label `auto`.
+- Public-channel topic welcome banners always display `Name: relay` to keep app identity stable, even when the internal persisted session label differs.
 - Welcome message uses a user-friendly MarkdownV2 format:
   - Example:
     🚀 **Session Started** • **Name:** `relay` • **ID:** `tg-1-0` • **Model:** `opencode/big-pickle` • **Type:** `opencode_acp` • **MCP:** `relay, workspace`
@@ -312,6 +325,6 @@ Relay runs with a single provider per process (`relay.provider`).
 6. `/topic` without name returns usage error.
 7. Restart clears in-memory sessions but topic sessions are lazy-restored from persisted metadata.
 8. Polling mode resumes from persisted Telegram offset in relay state DB.
-9. Partial thought updates are sent with Telegram Bot API `sendMessageDraft`.
-10. Final assistant response is sent with `sendMessage` using MarkdownV2 with fallback retry without `parse_mode`.
+9. Non-terminal ADK event progress sends `typing` chat actions in DM and public chats; `sendMessageDraft` thinking placeholders are DM-only.
+10. Final assistant response is sent with `sendMessage` using configured `relay.telegram.formatting_mode` with fallback retry without `parse_mode` on transport or parse/escaping API errors.
 11. `/close` in a topic closes that topic and stops the session; `/close` in root chat stops only root session.
