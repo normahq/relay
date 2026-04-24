@@ -237,7 +237,7 @@ func TestBuildRelayInstruction_IncludesFormattingGuidance_HTML(t *testing.T) {
 
 	wantSnippets := []string{
 		"Telegram formatting mode: `html`.",
-		"Use Telegram HTML parse mode. Supported tags: b/strong, i/em, u/ins, s/strike/del, tg-spoiler or span class=\"tg-spoiler\", a, code, pre, blockquote, tg-emoji, tg-time. Escape raw <, >, & as entities.",
+		"Use Telegram HTML parse mode. Supported tags: b/strong, i/em, u/ins, s/strike/del, tg-spoiler or span class=\"tg-spoiler\", a, code, pre, blockquote, tg-emoji, tg-time. Relay escapes unsafe raw <, >, & while preserving supported Telegram HTML tags.",
 		"Example output: <b>Build:</b> success. Run <code>relay start</code>.",
 	}
 	for _, snippet := range wantSnippets {

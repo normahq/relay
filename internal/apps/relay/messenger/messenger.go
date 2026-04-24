@@ -92,7 +92,7 @@ func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string,
 func (m *Messenger) SendAgentReply(ctx context.Context, chatID int64, text string, topicID int) error {
 	switch telegramfmt.NormalizeMode(m.agentReplyFormattingMode) {
 	case telegramfmt.ModeHTML:
-		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeHTML), "send message with HTML")
+		return m.sendMessageWithMode(ctx, chatID, telegramfmt.HTML(text), topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeHTML), "send message with HTML")
 	case telegramfmt.ModeNone:
 		return m.sendMessageWithMode(ctx, chatID, text, topicID, telegramfmt.TelegramParseMode(telegramfmt.ModeNone), "send message without parse_mode")
 	default:

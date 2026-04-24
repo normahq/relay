@@ -113,7 +113,8 @@ func TestPromptRuleAndExample(t *testing.T) {
 			wantRuleParts: []string{
 				"Use Telegram HTML parse mode",
 				"Supported tags: b/strong, i/em, u/ins, s/strike/del",
-				"Escape raw <, >, & as entities",
+				"Relay escapes unsafe raw <, >, &",
+				"preserving supported Telegram HTML tags",
 			},
 			denyRuleParts: []string{
 				"Relay converts it to Telegram MarkdownV2",

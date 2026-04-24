@@ -55,7 +55,7 @@ func TelegramParseMode(mode string) string {
 func PromptRuleAndExample(mode string) (rule string, example string) {
 	switch NormalizeMode(mode) {
 	case ModeHTML:
-		return "Use Telegram HTML parse mode. Supported tags: b/strong, i/em, u/ins, s/strike/del, tg-spoiler or span class=\"tg-spoiler\", a, code, pre, blockquote, tg-emoji, tg-time. Escape raw <, >, & as entities.", "<b>Build:</b> success. Run <code>relay start</code>."
+		return "Use Telegram HTML parse mode. Supported tags: b/strong, i/em, u/ins, s/strike/del, tg-spoiler or span class=\"tg-spoiler\", a, code, pre, blockquote, tg-emoji, tg-time. Relay escapes unsafe raw <, >, & while preserving supported Telegram HTML tags.", "<b>Build:</b> success. Run <code>relay start</code>."
 	case ModeNone:
 		return "Use plain text only. Do not use Markdown or HTML markup.", "Build: success. Run relay start."
 	default:

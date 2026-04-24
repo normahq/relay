@@ -185,10 +185,10 @@ func TestSendAgentReply_UsesConfiguredFormattingMode(t *testing.T) {
 			}(),
 		},
 		{
-			name:     "html passes telegram html through",
+			name:     "html preserves supported tags and escapes raw text",
 			mode:     telegramfmt.ModeHTML,
-			input:    "<b>final answer</b> with <code>code</code>",
-			wantText: "<b>final answer</b> with <code>code</code>",
+			input:    "<b>final answer</b> with <code>x < y</code> & <div>raw</div>",
+			wantText: "<b>final answer</b> with <code>x &lt; y</code> &amp; &lt;div&gt;raw&lt;/div&gt;",
 			wantMode: func() *string {
 				v := testParseModeHTML
 				return &v
