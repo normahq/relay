@@ -257,11 +257,8 @@ func TestRunTurn_SendsProgressForNonThoughtEvents(t *testing.T) {
 	if len(tgClient.drafts) != 0 {
 		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
 	}
-	if len(tgClient.messages) != 1 {
-		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
-	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "visible" {
-		t.Fatalf("message text = %q, want visible", tgClient.messages[0].Text)
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
 	}
 }
 
@@ -521,7 +518,7 @@ func TestRunTurn_AppendsFinalResponseTextEventsOnTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_AppendsNonPartialTextEventsOnTurnComplete(t *testing.T) {
+func TestRunTurn_DoesNotSendOnlyNonFinalTextOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -565,11 +562,75 @@ func TestRunTurn_AppendsNonPartialTextEventsOnTurnComplete(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	}
+}
+
+func TestRunTurn_DoesNotLeakNonFinalProgressTextInPublicChat(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	msg.SetAgentReplyFormattingMode("none")
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	h := &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		progressOne := adksession.NewEvent(invocationID)
+		progressOne.Content = &genai.Content{
+			Role: genai.RoleModel,
+			Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{Name: "approve"}},
+				{Text: "Сделаю: поставлю Approve и добавлю комментарий."},
+			},
+		}
+
+		progressTwo := adksession.NewEvent(invocationID)
+		progressTwo.Content = &genai.Content{
+			Role: genai.RoleModel,
+			Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{Name: "comment"}},
+				{Text: "Ставлю Approve и добавляю общий комментарий."},
+			},
+		}
+
+		final := adksession.NewEvent(invocationID)
+		final.Content = genai.NewContentFromText("Готово.\n\n- В PR 1762 поставил Approved.\n- Добавил комментарий.", genai.RoleModel)
+
+		done := adksession.NewEvent(invocationID)
+		done.TurnComplete = true
+
+		return []*adksession.Event{progressOne, progressTwo, final, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(-5173524191, 0)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true}
+	if err := h.runTurn(context.Background(), "approve PR", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.chatActions) != 1 {
+		t.Fatalf("chat action calls = %d, want 1", len(tgClient.chatActions))
+	}
+	if len(tgClient.drafts) != 0 {
+		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
+	}
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "old fallbacknew fallback" {
-		t.Fatalf("message text = %q, want appended fallback text", tgClient.messages[0].Text)
+	got := tgClient.messages[0].Text
+	if strings.Contains(got, "Сделаю") || strings.Contains(got, "Ставлю Approve") {
+		t.Fatalf("message text = %q, contains non-final progress text", got)
+	}
+	if !strings.Contains(got, "Готово.") || !strings.Contains(got, "Approved") {
+		t.Fatalf("message text = %q, want final response", got)
 	}
 }
 
@@ -604,7 +665,7 @@ func TestRunTurn_DoesNotSendWithoutTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_UsesPartialDeltaFallbackOnTurnComplete(t *testing.T) {
+func TestRunTurn_DoesNotSendOnlyPartialTextOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -639,15 +700,12 @@ func TestRunTurn_UsesPartialDeltaFallbackOnTurnComplete(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 1 {
-		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
-	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "Doing well" {
-		t.Fatalf("message text = %q, want Doing well", tgClient.messages[0].Text)
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
 	}
 }
 
-func TestRunTurn_AppendsPartialChunksInOrderOnTurnComplete(t *testing.T) {
+func TestRunTurn_DoesNotSendOnlyPartialMarkdownChunksOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -686,16 +744,12 @@ func TestRunTurn_AppendsPartialChunksInOrderOnTurnComplete(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 1 {
-		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
-	}
-	want := "**Статус задачи**\n- **Task:** `relay-runtime`\n- **Status:** in progress"
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != want {
-		t.Fatalf("message text = %q, want %q", tgClient.messages[0].Text, want)
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
 	}
 }
 
-func TestRunTurn_PartialFallbackSkipsThoughtText(t *testing.T) {
+func TestRunTurn_DoesNotSendOnlyThoughtOrPartialTextOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -735,11 +789,8 @@ func TestRunTurn_PartialFallbackSkipsThoughtText(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 1 {
-		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
-	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "visible" {
-		t.Fatalf("message text = %q, want visible", tgClient.messages[0].Text)
+	if len(tgClient.messages) != 0 {
+		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
 	}
 }
 

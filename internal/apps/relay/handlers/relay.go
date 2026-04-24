@@ -600,9 +600,9 @@ func (h *RelayHandler) runTurn(
 			}
 		}
 		eventText := eventTextBuilder.String()
-		if eventText != "" {
+		if eventText != "" && ev.IsFinalResponse() {
 			currentText := streamedText.String()
-			if !ev.IsFinalResponse() || ev.Partial || eventText != currentText {
+			if eventText != currentText {
 				streamedText.WriteString(eventText)
 			}
 		}
