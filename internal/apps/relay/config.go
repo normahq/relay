@@ -7,14 +7,14 @@ type Config struct {
 
 // RelayConfig holds the relay-specific configuration.
 type RelayConfig struct {
-	Provider           string          `mapstructure:"provider"`
-	Telegram           TelegramConfig  `mapstructure:"telegram"`
-	Logger             LoggerConfig    `mapstructure:"logger"`
-	WorkingDir         string          `mapstructure:"working_dir"`
-	StateDir           string          `mapstructure:"state_dir"`
-	Workspace          WorkspaceConfig `mapstructure:"workspace"`
-	MCPServers         []string        `mapstructure:"mcp_servers"`
-	SystemInstructions string          `mapstructure:"system_instructions"`
+	Provider          string          `mapstructure:"provider"`
+	Telegram          TelegramConfig  `mapstructure:"telegram"`
+	Logger            LoggerConfig    `mapstructure:"logger"`
+	WorkingDir        string          `mapstructure:"working_dir"`
+	StateDir          string          `mapstructure:"state_dir"`
+	Workspace         WorkspaceConfig `mapstructure:"workspace"`
+	MCPServers        []string        `mapstructure:"mcp_servers"`
+	GlobalInstruction string          `mapstructure:"global_instruction"`
 }
 
 // TelegramConfig holds the Telegram bot configuration.

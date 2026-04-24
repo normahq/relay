@@ -78,7 +78,7 @@ Relay startup order is strict:
 
 1. Load Norma + relay config.
 2. Start internal MCP lifecycle manager.
-3. Start relay root provider via `agentfactory.Factory`.
+3. Start relay provider via `agentfactory.Factory`.
 4. Start Telegram runtime receiver.
 
 Internal MCP v1 scope is config + lifecycle plumbing; server implementations can be added incrementally.
@@ -224,9 +224,9 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
   - relay agents should use the config path shown in the system instruction and edit `.config/relay/config.yaml` directly
 - `relay.mcp_servers`: extra MCP server IDs for all relay-started sessions (must reference IDs declared in `runtime.mcp_servers`)
   - effective MCP IDs = bundled defaults + `runtime.providers.<provider_id>.mcp_servers` + `relay.mcp_servers` (deduplicated)
-- `relay.system_instructions`: optional relay instruction text applied to all sessions
-  - value: instruction text appended in relay prompt for all agents
-  - effective relay instruction order: built-in relay instructions + `runtime.providers.<provider_id>.system_instructions` + `relay.system_instructions` (last wins by position)
+- `relay.global_instruction`: optional relay-wide global instruction applied to all sessions
+  - value: global instruction text included in relay prompt for all agents
+  - effective relay instruction order: built-in relay instructions + `relay.global_instruction` + `runtime.providers.<provider_id>.system_instructions`
   - `relay init` generates a channel-aware example prompt
 - `relay.workspace.mode`: `on|off|auto` (default `auto`)
   - `on`: always use Git worktrees per session; startup fails if `working_dir` is not a Git repository
@@ -304,7 +304,7 @@ Relay runs with a single provider per process (`relay.provider`).
 
 ## Acceptance/Verification Scenarios
 
-1. Startup order enforces internal MCP -> root provider -> bot runtime.
+1. Startup order enforces internal MCP -> relay provider -> bot runtime.
 2. Polling mode starts by default when `relay.telegram.webhook.enabled=false`.
 3. Webhook mode (`relay.telegram.webhook.enabled=true`) fails fast without `relay.telegram.webhook.url`.
 4. `/start <token>` registers owner once; non-owner traffic is rejected.

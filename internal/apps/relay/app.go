@@ -17,7 +17,6 @@ import (
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	"github.com/normahq/relay/internal/apps/relay/handlers"
-	"github.com/normahq/relay/internal/apps/relay/runtimecfg"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
 	"github.com/normahq/relay/internal/apps/relay/tgbotkit"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
@@ -111,11 +110,6 @@ func Module(
 			),
 		),
 		fx.Provide(
-			func() *runtimecfg.Loader {
-				return runtimecfg.NewLoader(runtimeLoadOpts, defaultsYAML)
-			},
-		),
-		fx.Provide(
 			func(lc fx.Lifecycle) (relaystate.Provider, error) {
 				if err := os.MkdirAll(stateDir, 0o755); err != nil {
 					return nil, fmt.Errorf("create relay state dir: %w", err)
@@ -201,9 +195,9 @@ func Module(
 		fx.Provide(
 			fx.Annotate(
 				func() string {
-					return strings.TrimSpace(cfg.Relay.SystemInstructions)
+					return strings.TrimSpace(cfg.Relay.GlobalInstruction)
 				},
-				fx.ResultTags(`name:"relay_system_instructions"`),
+				fx.ResultTags(`name:"relay_global_instruction"`),
 			),
 		),
 		fx.Provide(
@@ -243,11 +237,17 @@ func Module(
 		fx.Provide(
 			handlers.NewInternalMCPManager,
 		),
-		// Start Telegram runtime only after internal MCP is started.
-		fx.Invoke(func(lc fx.Lifecycle, bot *runtime.Bot, _ *handlers.InternalMCPManager) {
+		// Start relay provider runtime and Telegram runtime only after bundled internal MCP is started.
+		fx.Invoke(func(lc fx.Lifecycle, bot *runtime.Bot, runtimeManager *relayagent.RuntimeManager, mcpManager *handlers.InternalMCPManager) {
 			runCtx, cancel := context.WithCancel(context.Background())
 			lc.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
+					if err := mcpManager.EnsureStarted(ctx); err != nil {
+						return fmt.Errorf("start bundled internal MCP servers: %w", err)
+					}
+					if err := runtimeManager.EnsureRuntime(ctx); err != nil {
+						return fmt.Errorf("start relay provider runtime: %w", err)
+					}
 					go func() {
 						if err := bot.Run(runCtx); err != nil {
 							if isExpectedBotRunShutdown(err) {

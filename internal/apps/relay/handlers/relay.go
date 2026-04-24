@@ -9,11 +9,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
-	"github.com/normahq/relay/internal/apps/relay/runtimecfg"
 	relaysession "github.com/normahq/relay/internal/apps/relay/session"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -58,11 +56,9 @@ type RelayHandler struct {
 	sessionManager    *relaysession.Manager
 	turnDispatcher    turnQueue
 	messenger         *messenger.Messenger
-	configLoader      runtimeConfigLoader
 	tgClient          client.ClientWithResponsesInterface
 	authToken         string
-	rootAgentName     string
-	normaCfg          runtimeconfig.RuntimeConfig
+	relayProviderName string
 	logger            zerolog.Logger
 	authorizer        auth.Authorizer
 
@@ -71,10 +67,6 @@ type RelayHandler struct {
 	chatID      int64
 	botUsername string
 	botUserID   int64
-}
-
-type runtimeConfigLoader interface {
-	Load() (runtimecfg.Snapshot, error)
 }
 
 type relayHandlerDeps struct {
@@ -87,11 +79,9 @@ type relayHandlerDeps struct {
 	SessionManager     *relaysession.Manager
 	TurnDispatcher     *TurnDispatcher
 	Messenger          *messenger.Messenger
-	RuntimeConfig      *runtimecfg.Loader
 	TGClient           client.ClientWithResponsesInterface
 	AuthToken          string `name:"relay_auth_token"`
-	RootProviderID     string `name:"relay_provider"`
-	NormaCfg           runtimeconfig.RuntimeConfig
+	RelayProviderID    string `name:"relay_provider"`
 	Logger             zerolog.Logger
 	InternalMCPManager *InternalMCPManager `optional:"true"`
 }
@@ -104,11 +94,9 @@ func NewRelayHandler(deps relayHandlerDeps) (*RelayHandler, error) {
 		sessionManager:    deps.SessionManager,
 		turnDispatcher:    deps.TurnDispatcher,
 		messenger:         deps.Messenger,
-		configLoader:      deps.RuntimeConfig,
 		tgClient:          deps.TGClient,
 		authToken:         strings.TrimSpace(deps.AuthToken),
-		rootAgentName:     strings.TrimSpace(deps.RootProviderID),
-		normaCfg:          deps.NormaCfg,
+		relayProviderName: strings.TrimSpace(deps.RelayProviderID),
 		logger:            deps.Logger.With().Str("component", "relay.handler").Logger(),
 	}
 	h.authorizer = &relayAuthorizer{ownerStore: deps.OwnerStore, collaboratorStore: deps.CollaboratorStore}
@@ -165,13 +153,9 @@ func (h *RelayHandler) ActivateOwner(ctx context.Context, ownerID, chatID int64)
 }
 
 func (h *RelayHandler) bootstrapRootSession(ctx context.Context, ownerID, chatID int64) error {
-	if err := h.refreshRuntimeConfig(); err != nil {
-		return fmt.Errorf("refresh runtime config: %w", err)
-	}
-
-	rootAgentName := h.getProviderName()
-	if rootAgentName == "" {
-		return fmt.Errorf("relay root provider is not configured")
+	relayProviderName := h.getProviderName()
+	if relayProviderName == "" {
+		return fmt.Errorf("relay provider is not configured")
 	}
 
 	locator := relaysession.NewTelegramSessionLocator(chatID, 0)
@@ -185,14 +169,14 @@ func (h *RelayHandler) bootstrapRootSession(ctx context.Context, ownerID, chatID
 		return fmt.Errorf("create root session: %w", err)
 	}
 
-	metadata := h.sessionManager.GetAgentMetadata(rootAgentName)
+	metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
 	welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 	_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 
 	h.logger.Info().
 		Int64("owner_id", ownerID).
 		Int64("chat_id", chatID).
-		Str("agent", rootAgentName).
+		Str("agent", relayProviderName).
 		Msg("root session bootstrapped")
 	return nil
 }
@@ -260,20 +244,15 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 			existingSession, _ := h.sessionManager.GetSession(locator)
 			sendRootWelcome := existingSession == nil
 			if existingSession == nil {
-				if err := h.refreshRuntimeConfig(); err != nil {
-					h.logger.Error().Err(err).Int64("chat_id", locatorChatID(locator)).Msg("failed to refresh runtime config before root session creation")
-					_ = h.channel.SendPlain(ctx, locator, "Failed to reload relay config for root session creation. Please check config and try again.")
-					return nil
-				}
-				rootAgentName := h.getProviderName()
-				if rootAgentName == "" {
-					_ = h.channel.SendPlain(ctx, locator, "Relay root provider is not configured (`relay.provider`). Please close this chat and restart relay.")
+				relayProviderName := h.getProviderName()
+				if relayProviderName == "" {
+					_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
 					return nil
 				}
 			}
-			rootAgentName := h.getProviderName()
-			if rootAgentName == "" {
-				_ = h.channel.SendPlain(ctx, locator, "Relay root provider is not configured (`relay.provider`). Please close this chat and restart relay.")
+			relayProviderName := h.getProviderName()
+			if relayProviderName == "" {
+				_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
 				return nil
 			}
 			ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
@@ -281,12 +260,12 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 				UserID:  transportUserID,
 			}, rootSessionLabel)
 			if err != nil {
-				log.Error().Err(err).Str("agent", rootAgentName).Msg("failed to ensure root session")
+				log.Error().Err(err).Str("agent", relayProviderName).Msg("failed to ensure root session")
 				_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start root session: %v.\n\nPlease close this chat and start again.", err))
 				return nil
 			}
 			if sendRootWelcome {
-				metadata := h.sessionManager.GetAgentMetadata(rootAgentName)
+				metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
 				welcomeMsg := BuildAgentWelcomeMessage(rootSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 			}
@@ -296,20 +275,15 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 		if err != nil {
 			_ = h.channel.SendPlain(ctx, locator, "Restoring agent session...")
 			ts, err = h.sessionManager.RestoreSession(ctx, relaysession.SessionContext{
-				Locator:                   locator,
-				UserID:                    transportUserID,
-				AllowRootProviderFallback: false,
+				Locator:                    locator,
+				UserID:                     transportUserID,
+				AllowRelayProviderFallback: false,
 			})
 			if err != nil {
 				if errors.Is(err, relaysession.ErrNoPersistedSession) {
-					if refreshErr := h.refreshRuntimeConfig(); refreshErr != nil {
-						h.logger.Error().Err(refreshErr).Int64("chat_id", locatorChatID(locator)).Msg("failed to refresh runtime config before topic session creation")
-						_ = h.channel.SendPlain(ctx, locator, "Failed to reload relay config for topic session creation. Please check config and try again.")
-						return nil
-					}
-					rootAgentName := h.getProviderName()
-					if rootAgentName == "" {
-						_ = h.channel.SendPlain(ctx, locator, "Relay root provider is not configured (`relay.provider`). Please close this chat and restart relay.")
+					relayProviderName := h.getProviderName()
+					if relayProviderName == "" {
+						_ = h.channel.SendPlain(ctx, locator, "Relay provider is not configured (`relay.provider`). Please close this chat and restart relay.")
 						return nil
 					}
 					ts, err = h.sessionManager.EnsureSession(ctx, relaysession.SessionContext{
@@ -317,7 +291,7 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 						UserID:  transportUserID,
 					}, autoSessionLabel)
 					if err != nil {
-						log.Error().Err(err).Str("agent", rootAgentName).Int("topic_id", topicID).Msg("failed to create topic session")
+						log.Error().Err(err).Str("agent", relayProviderName).Int("topic_id", topicID).Msg("failed to create topic session")
 						_ = h.channel.SendPlain(ctx, locator, fmt.Sprintf("Failed to start topic session: %v.\n\nPlease close this chat topic and create a new session with /topic <name>.", err))
 						return nil
 					}
@@ -328,8 +302,8 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 				}
 			}
 			if ts != nil {
-				rootProviderID := h.getProviderName()
-				metadata := h.sessionManager.GetAgentMetadata(rootProviderID)
+				relayProviderID := h.getProviderName()
+				metadata := h.sessionManager.GetAgentMetadata(relayProviderID)
 				welcomeMsg := BuildAgentWelcomeMessage(ts.GetAgentName(), ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
 			}
@@ -337,7 +311,7 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 	}
 
 	if h.turnDispatcher == nil {
-		if err := h.runTurnTask(ctx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), locator, messageCtx.MessageID, topicID, messageCtx.AllowProgressHints); err != nil {
+		if err := h.runTurnTask(ctx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), ts.GetAgentSessionID(), locator, messageCtx.MessageID, topicID, messageCtx.AllowProgressHints); err != nil {
 			log.Error().Err(err).Int("topic_id", topicID).Msg("Agent execution failed")
 		}
 		return nil
@@ -379,7 +353,7 @@ func (h *RelayHandler) enqueueTurn(
 					Msg("dropping queued turn for inactive session")
 				return nil
 			}
-			return h.runTurnTask(runCtx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), locator, messageID, topicID, allowProgressHints)
+			return h.runTurnTask(runCtx, text, ts.GetRunner(), ts.GetUserID(), ts.GetSessionID(), ts.GetAgentSessionID(), locator, messageID, topicID, allowProgressHints)
 		},
 	})
 	if err != nil {
@@ -406,12 +380,13 @@ func (h *RelayHandler) runTurnTask(
 	r *runner.Runner,
 	userID string,
 	sessionID string,
+	agentSessionID string,
 	locator relaysession.SessionLocator,
 	messageID int,
 	topicID int,
 	allowProgressHints bool,
 ) error {
-	err := h.runTurn(ctx, text, r, userID, sessionID, locator, messageID, allowProgressHints)
+	err := h.runTurn(ctx, text, r, userID, sessionID, agentSessionID, locator, messageID, allowProgressHints)
 	if err == nil {
 		return nil
 	}
@@ -493,10 +468,15 @@ func (h *RelayHandler) runTurn(
 	r *runner.Runner,
 	userID string,
 	sessionID string,
+	agentSessionID string,
 	locator relaysession.SessionLocator,
 	messageID int,
 	allowProgressHints bool,
 ) error {
+	if strings.TrimSpace(agentSessionID) == "" {
+		agentSessionID = sessionID
+	}
+
 	address, ok, err := locator.TelegramAddress()
 	if err != nil {
 		return fmt.Errorf("decode telegram locator: %w", err)
@@ -514,6 +494,7 @@ func (h *RelayHandler) runTurn(
 		Int64("chat_id", chatID).
 		Int("topic_id", topicID).
 		Str("session_id", sessionID).
+		Str("agent_session_id", agentSessionID).
 		Str("transport_user_id", userID).
 		Logger().
 		WithContext(ctx)
@@ -522,7 +503,7 @@ func (h *RelayHandler) runTurn(
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
 
-	for ev, err := range r.Run(runCtx, userID, sessionID, userContent, agent.RunConfig{}) {
+	for ev, err := range r.Run(runCtx, userID, agentSessionID, userContent, agent.RunConfig{}) {
 		if err != nil {
 			return fmt.Errorf("agent run: %w", err)
 		}
@@ -666,38 +647,13 @@ func (h *RelayHandler) initializeBotUsername(ctx context.Context) error {
 }
 
 func (h *RelayHandler) getProviderName() string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.rootAgentName
-}
-
-func (h *RelayHandler) setProviderName(agentName string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.rootAgentName = strings.TrimSpace(agentName)
-}
-
-func (h *RelayHandler) refreshRuntimeConfig() error {
-	if h.configLoader == nil {
-		return nil
+	providerName := strings.TrimSpace(h.sessionManager.RelayProviderID())
+	if providerName == "" {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		providerName = strings.TrimSpace(h.relayProviderName)
 	}
-	snapshot, err := h.configLoader.Load()
-	if err != nil {
-		return err
-	}
-	if err := h.sessionManager.ApplyRuntimeConfig(snapshot.Runtime, snapshot.Relay); err != nil {
-		return err
-	}
-	h.setProviderName(snapshot.Relay.Provider)
-	return nil
-}
-
-func locatorChatID(locator relaysession.SessionLocator) int64 {
-	address, ok, err := locator.TelegramAddress()
-	if err != nil || !ok {
-		return 0
-	}
-	return address.ChatID
+	return providerName
 }
 
 func (h *RelayHandler) normalizePublicText(messageCtx relaytelegram.MessageContext) (string, bool) {

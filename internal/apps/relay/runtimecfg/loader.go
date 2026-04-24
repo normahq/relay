@@ -9,9 +9,9 @@ import (
 
 // RelayConfig holds the relay runtime fields that affect new session creation.
 type RelayConfig struct {
-	Provider           string   `mapstructure:"provider"`
-	MCPServers         []string `mapstructure:"mcp_servers"`
-	SystemInstructions string   `mapstructure:"system_instructions"`
+	Provider          string   `mapstructure:"provider"`
+	MCPServers        []string `mapstructure:"mcp_servers"`
+	GlobalInstruction string   `mapstructure:"global_instruction"`
 }
 
 // Document is the runtime relay config document shape.

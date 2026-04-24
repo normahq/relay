@@ -26,7 +26,7 @@ profiles:
       provider: opencode
       mcp_servers:
         - ext
-      system_instructions: from profile
+      global_instruction: from profile
 `); err != nil {
 		t.Fatalf("writeRuntimeConfig() error = %v", err)
 	}
@@ -42,8 +42,8 @@ profiles:
 	if len(snapshot.Relay.MCPServers) != 1 || snapshot.Relay.MCPServers[0] != "ext" {
 		t.Fatalf("relay.mcp_servers = %#v, want [ext]", snapshot.Relay.MCPServers)
 	}
-	if got := snapshot.Relay.SystemInstructions; got != "from profile" {
-		t.Fatalf("relay.system_instructions = %q, want from profile", got)
+	if got := snapshot.Relay.GlobalInstruction; got != "from profile" {
+		t.Fatalf("relay.global_instruction = %q, want from profile", got)
 	}
 }
 

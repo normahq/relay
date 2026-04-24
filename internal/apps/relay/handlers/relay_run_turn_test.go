@@ -96,7 +96,7 @@ func TestRunTurn_SendsTypingForThoughtDraftUpdates(t *testing.T) {
 
 	adkRunner, sessionID := newRelayRunTurnTestRunner(t)
 	locator := relaysession.NewTelegramSessionLocator(9001, 77)
-	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, locator, 41, true); err != nil {
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, true); err != nil {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestRunTurn_SkipsTypingAndDraftWhenProgressHintsDisabled(t *testing.T) {
 
 	adkRunner, sessionID := newRelayRunTurnTestRunner(t)
 	locator := relaysession.NewTelegramSessionLocator(9001, 77)
-	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, locator, 41, false); err != nil {
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, false); err != nil {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 

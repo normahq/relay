@@ -463,7 +463,7 @@ func newRelayMessageHandlerHarness(t *testing.T, topicID int) (*RelayHandler, *f
 		authorizer:     &fakeRelayAuthorizer{ownerID: 101},
 	}
 	handler.SetOwner(101, 9001)
-	setUnexportedField(t, handler, "rootAgentName", "alpha")
+	setUnexportedField(t, handler, "relayProviderName", "alpha")
 	handler.botUsername = "testbot"
 	handler.botUserID = 4242
 

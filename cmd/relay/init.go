@@ -30,7 +30,7 @@ const (
 	relayInitClaudeCodeModel = "claude-sonnet-4-6"
 )
 
-const relayInitSystemInstructionExample = "You are my relay agent.\nPrefer concise, actionable answers.\nUse relay.providers.start without a locator when you want a subagent in the current chat context.\nUse relay.workspace import/export instead of manual branch landing when workspace mode is enabled."
+const relayInitGlobalInstructionExample = "You are my relay agent.\nPrefer concise, actionable answers.\nUse relay.providers.start without a locator when you want a subagent in the current chat context.\nUse relay.workspace import/export instead of manual branch landing when workspace mode is enabled."
 
 type relayTokenStorageMode string
 
@@ -96,15 +96,15 @@ func initCommand() *cobra.Command {
 
 			interactive := relayInitIsInteractive()
 			inputReader := bufio.NewReader(relayInitInput)
-			selectedRootProvider, err := chooseRelayProvider(agentIDs, inputReader, relayInitOutput, interactive)
+			selectedRelayProvider, err := chooseRelayProvider(agentIDs, inputReader, relayInitOutput, interactive)
 			if err != nil {
 				return err
 			}
 
-			if err := setRelayProvider(doc, selectedRootProvider); err != nil {
+			if err := setRelayProvider(doc, selectedRelayProvider); err != nil {
 				return err
 			}
-			if err := setRelayAgentSystemInstructionExample(doc, selectedRootProvider); err != nil {
+			if err := setRelayGlobalInstructionExample(doc); err != nil {
 				return err
 			}
 			telegramToken, bot, promptErr := promptRelayTelegramToken(inputReader, relayInitOutput, interactive)
@@ -150,7 +150,7 @@ func initCommand() *cobra.Command {
 			_, _ = fmt.Fprintf(relayInitOutput, "relay initialized successfully\n")
 			_, _ = fmt.Fprintf(relayInitOutput, "config: %s\n", configPath)
 			_, _ = fmt.Fprintf(relayInitOutput, "state db: %s\n", dbPath)
-			_, _ = fmt.Fprintf(relayInitOutput, "root provider: %s\n", selectedRootProvider)
+			_, _ = fmt.Fprintf(relayInitOutput, "relay provider: %s\n", selectedRelayProvider)
 			_, _ = fmt.Fprintf(relayInitOutput, "telegram token stored in: %s\n", storageTarget)
 			_, _ = fmt.Fprintf(relayInitOutput, "start command: relay start\n")
 			_, _ = fmt.Fprintf(relayInitOutput, "auth command: /start %s\n", ownerToken)
@@ -528,14 +528,14 @@ func setRelayTelegramToken(doc map[string]any, token string) error {
 	return nil
 }
 
-func setRelayAgentSystemInstructionExample(doc map[string]any, rootAgent string) error {
+func setRelayGlobalInstructionExample(doc map[string]any) error {
 	relaySection, ok := toStringAnyMap(doc["relay"])
 	if !ok {
 		return fmt.Errorf("relay section is missing from generated config")
 	}
 
-	if existing, exists := relaySection["system_instructions"]; !exists || strings.TrimSpace(fmt.Sprintf("%v", existing)) == "" {
-		relaySection["system_instructions"] = relayInitSystemInstructionExample
+	if existing, exists := relaySection["global_instruction"]; !exists || strings.TrimSpace(fmt.Sprintf("%v", existing)) == "" {
+		relaySection["global_instruction"] = relayInitGlobalInstructionExample
 	}
 
 	doc["relay"] = relaySection

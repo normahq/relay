@@ -86,7 +86,7 @@ func TestInitCommand_NonInteractiveAutoSelectsRootAndGeneratesDetectedAgents(t *
 	if got := workspaceSection["base_branch"]; got != "main" {
 		t.Fatalf("relay.workspace.base_branch = %#v, want main", got)
 	}
-	assertRelaySystemInstructionExample(t, relaySection)
+	assertRelayGlobalInstructionExample(t, relaySection)
 
 	normaSection, ok := toStringAnyMap(doc["runtime"])
 	if !ok {
@@ -183,7 +183,7 @@ func TestInitCommand_InteractiveSelectionAndToken(t *testing.T) {
 	if got := relaySection["provider"]; got != testRelayProviderOpencode {
 		t.Fatalf("relay.provider = %#v, want %s", got, testRelayProviderOpencode)
 	}
-	assertRelaySystemInstructionExample(t, relaySection)
+	assertRelayGlobalInstructionExample(t, relaySection)
 	telegramSection := mustMap(t, relaySection, "telegram")
 	if got := telegramSection["token"]; got != testRelayTokenMyToken {
 		t.Fatalf("relay.telegram.token = %#v, want %s", got, testRelayTokenMyToken)
@@ -237,7 +237,7 @@ func TestInitCommand_InteractiveDefaultPrioritizesCopilotBeforeGemini(t *testing
 		t.Fatalf("relay.telegram.token = %#v, want empty string when stored in .env", got)
 	}
 	assertDotEnvTokenValue(t, workingDir, testRelayTokenMyToken)
-	assertRelaySystemInstructionExample(t, relaySection)
+	assertRelayGlobalInstructionExample(t, relaySection)
 }
 
 func TestInitCommand_FailsWhenNoSupportedAgentCLIFound(t *testing.T) {
@@ -821,21 +821,21 @@ func assertProfileRoot(t *testing.T, profiles map[string]any, profileName, wantR
 	}
 }
 
-func assertRelaySystemInstructionExample(t *testing.T, relaySection map[string]any) {
+func assertRelayGlobalInstructionExample(t *testing.T, relaySection map[string]any) {
 	t.Helper()
-	rawPrompt, ok := relaySection["system_instructions"]
+	rawPrompt, ok := relaySection["global_instruction"]
 	if !ok {
-		t.Fatalf("relay.system_instructions key is missing")
+		t.Fatalf("relay.global_instruction key is missing")
 	}
 	prompt, ok := rawPrompt.(string)
 	if !ok {
-		t.Fatalf("relay.system_instructions type = %T, want string", rawPrompt)
+		t.Fatalf("relay.global_instruction type = %T, want string", rawPrompt)
 	}
 	if strings.TrimSpace(prompt) == "" {
-		t.Fatalf("relay.system_instructions is empty")
+		t.Fatalf("relay.global_instruction is empty")
 	}
-	if prompt != relayInitSystemInstructionExample {
-		t.Fatalf("relay.system_instructions = %q, want %q", prompt, relayInitSystemInstructionExample)
+	if prompt != relayInitGlobalInstructionExample {
+		t.Fatalf("relay.global_instruction = %q, want %q", prompt, relayInitGlobalInstructionExample)
 	}
 }
 

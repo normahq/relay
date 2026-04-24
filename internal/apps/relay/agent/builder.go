@@ -6,15 +6,16 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
 
-	"github.com/normahq/norma/pkg/runtime/acpagent"
 	"github.com/normahq/norma/pkg/runtime/agentconfig"
 	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
+	"github.com/normahq/norma/pkg/runtime/sessionstate"
 	"github.com/normahq/relay/internal/git"
 	"go.uber.org/fx"
 	"google.golang.org/adk/agent"
@@ -23,7 +24,7 @@ import (
 )
 
 //go:embed system_instruction.gotmpl
-var relaySystemInstructionTmpl string
+var relayInstructionTmpl string
 
 const (
 	workspaceBranchUnknown = "unknown"
@@ -36,7 +37,11 @@ type Builder struct {
 	workingDir             string
 	workspaceEnabled       bool
 	workspaceBaseBranch    string
-	relaySystemInstruction string
+	relayGlobalInstruction string
+}
+
+type sessionStateFactory interface {
+	BuildSessionState(agentID, workspaceDir string) (map[string]any, error)
 }
 
 type relayPromptData struct {
@@ -49,10 +54,11 @@ type relayPromptData struct {
 	WorkspaceMode     string
 	BaseBranch        string
 	RepoBranchAtStart string
-	AgentInstructions string
+	GlobalInstruction string
+	Instruction       string
 }
 
-func (b *Builder) buildRelaySystemInstruction(
+func (b *Builder) buildRelayInstruction(
 	sessionID,
 	channelType,
 	agentName,
@@ -97,16 +103,17 @@ func (b *Builder) buildRelaySystemInstruction(
 		RepoBranchAtStart: repoBranch,
 	}
 
-	normaInstruction := ""
+	agentInstruction := ""
 	if agentCfg, ok := b.normaCfg.Providers[normalizedAgentName]; ok {
-		normaInstruction = agentCfg.SystemInstructions
+		agentInstruction = agentCfg.SystemInstructions
 	}
-	data.AgentInstructions = composeAgentInstructions(normaInstruction, b.relaySystemInstruction)
+	data.GlobalInstruction = strings.TrimSpace(b.relayGlobalInstruction)
+	data.Instruction = strings.TrimSpace(agentInstruction)
 
 	var buf bytes.Buffer
-	tmpl := template.Must(template.New("relay").Parse(relaySystemInstructionTmpl))
+	tmpl := template.Must(template.New("relay").Parse(relayInstructionTmpl))
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return relaySystemInstructionTmpl
+		return relayInstructionTmpl
 	}
 	return buf.String()
 }
@@ -127,7 +134,7 @@ type BuilderParams struct {
 	WorkingDir             string
 	WorkspaceEnabled       bool   `name:"relay_workspace_enabled"`
 	WorkspaceBaseBranch    string `name:"relay_workspace_base_branch"`
-	RelaySystemInstruction string `name:"relay_system_instructions"`
+	RelayGlobalInstruction string `name:"relay_global_instruction"`
 }
 
 // NewBuilder creates a Builder with the given factory and config.
@@ -138,7 +145,7 @@ func NewBuilder(params BuilderParams) *Builder {
 		workingDir:             strings.TrimSpace(params.WorkingDir),
 		workspaceEnabled:       params.WorkspaceEnabled,
 		workspaceBaseBranch:    strings.TrimSpace(params.WorkspaceBaseBranch),
-		relaySystemInstruction: strings.TrimSpace(params.RelaySystemInstruction),
+		relayGlobalInstruction: strings.TrimSpace(params.RelayGlobalInstruction),
 	}
 }
 
@@ -155,6 +162,13 @@ type BuiltAgent struct {
 	Session    session.Session
 }
 
+type BuiltRuntime struct {
+	Agent      agent.Agent
+	Runner     *runner.Runner
+	SessionSvc session.Service
+	AppName    string
+}
+
 type AgentMetadata struct {
 	Type       string
 	Model      string
@@ -163,6 +177,104 @@ type AgentMetadata struct {
 
 func (b *Builder) Build(ctx context.Context, sessionID, userID string, chatID int64, topicID int, agentName, workspaceDir string) (*BuiltAgent, error) {
 	return b.BuildWithMCPServerIDs(ctx, sessionID, userID, chatID, topicID, agentName, workspaceDir, nil, nil)
+}
+
+func (b *Builder) BuildRuntime(ctx context.Context, agentName, workspaceDir string) (*BuiltRuntime, error) {
+	return b.BuildRuntimeWithMCPServerIDs(ctx, agentName, workspaceDir, nil, nil)
+}
+
+func (b *Builder) BuildRuntimeWithMCPServerIDs(
+	ctx context.Context,
+	agentName, workspaceDir string,
+	bundledMCPServerIDs []string,
+	extraMCPServerIDs []string,
+) (*BuiltRuntime, error) {
+	const appName = "norma-relay"
+
+	req := agentfactory.BuildRequest{
+		AgentID:          agentName,
+		Name:             agentName,
+		Description:      b.buildAgentDescription(agentName),
+		WorkingDirectory: workspaceDir,
+		Instruction:      b.buildRelayInstruction("relay-runtime", "telegram", agentName, "norma/relay/relay-runtime", workspaceDir, b.currentRepoBranch(ctx)),
+		MCPServerIDs:     b.buildAgentMCPServerIDs(agentName, bundledMCPServerIDs, extraMCPServerIDs),
+	}
+
+	ag, err := b.factory.Build(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("creating agent %q: %w", agentName, err)
+	}
+
+	sessionSvc := session.InMemoryService()
+	r, err := runner.New(runner.Config{
+		AppName:        appName,
+		Agent:          ag,
+		SessionService: sessionSvc,
+	})
+	if err != nil {
+		if closer, ok := ag.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		return nil, fmt.Errorf("creating runner: %w", err)
+	}
+
+	return &BuiltRuntime{
+		Agent:      ag,
+		Runner:     r,
+		SessionSvc: sessionSvc,
+		AppName:    appName,
+	}, nil
+}
+
+func (b *Builder) CreateRuntimeSession(
+	ctx context.Context,
+	runtime *BuiltRuntime,
+	agentName string,
+	userID string,
+	sessionID string,
+	workspaceDir string,
+) (session.Session, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("runtime is required")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if strings.TrimSpace(agentName) == "" {
+		return nil, fmt.Errorf("agent name is required")
+	}
+	if runtime.SessionSvc == nil {
+		return nil, fmt.Errorf("session service is required")
+	}
+	if strings.TrimSpace(workspaceDir) == "" {
+		return nil, fmt.Errorf("workspace dir is required")
+	}
+	state, err := b.buildSessionState(agentName, workspaceDir)
+	if err != nil {
+		return nil, err
+	}
+
+	appName := strings.TrimSpace(runtime.AppName)
+	if appName == "" {
+		appName = "norma-relay"
+	}
+	req := &session.CreateRequest{
+		AppName:   appName,
+		UserID:    strings.TrimSpace(userID),
+		SessionID: strings.TrimSpace(sessionID),
+	}
+	if len(state) > 0 {
+		req.State = state
+	}
+	sess, err := runtime.SessionSvc.Create(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("creating session: %w", err)
+	}
+
+	return sess.Session, nil
 }
 
 func (b *Builder) BuildWithMCPServerIDs(
@@ -180,14 +292,18 @@ func (b *Builder) BuildWithMCPServerIDs(
 	}
 	sessionBranch := fmt.Sprintf("norma/relay/%s", sessionID)
 	repoBranchAtStart := b.currentRepoBranch(ctx)
+	state, err := b.buildSessionState(agentName, workspaceDir)
+	if err != nil {
+		return nil, err
+	}
 	req := agentfactory.BuildRequest{
-		AgentID:            agentName,
-		Name:               agentName,
-		Description:        b.buildAgentDescription(agentName),
-		WorkingDirectory:   workspaceDir,
-		SystemInstructions: b.buildRelaySystemInstruction(sessionID, "telegram", agentName, sessionBranch, workspaceDir, repoBranchAtStart),
-		MCPServerIDs:       b.buildAgentMCPServerIDs(agentName, bundledMCPServerIDs, extraMCPServerIDs),
-		SessionID:          sessionID,
+		AgentID:          agentName,
+		Name:             agentName,
+		Description:      b.buildAgentDescription(agentName),
+		WorkingDirectory: workspaceDir,
+		Instruction:      b.buildRelayInstruction(sessionID, "telegram", agentName, sessionBranch, workspaceDir, repoBranchAtStart),
+		MCPServerIDs:     b.buildAgentMCPServerIDs(agentName, bundledMCPServerIDs, extraMCPServerIDs),
+		SessionID:        sessionID,
 	}
 
 	ag, err := b.factory.Build(ctx, req)
@@ -200,11 +316,7 @@ func (b *Builder) BuildWithMCPServerIDs(
 		AppName:   fmt.Sprintf("norma-relay-topic-%d", topicID),
 		UserID:    strings.TrimSpace(userID),
 		SessionID: sessionID,
-		State: map[string]any{
-			acpagent.SessionStateKey: map[string]any{
-				"cwd": workspaceDir,
-			},
-		},
+		State:     state,
 	})
 	if err != nil {
 		if closer, ok := ag.(io.Closer); ok {
@@ -352,6 +464,42 @@ func mergeMCPServerIDsWithBase(base, explicit, extra []string) []string {
 	return out
 }
 
+func (b *Builder) buildSessionState(agentName, workspaceDir string) (map[string]any, error) {
+	if strings.TrimSpace(agentName) == "" {
+		return nil, fmt.Errorf("agent name is required")
+	}
+	if strings.TrimSpace(workspaceDir) == "" {
+		return nil, fmt.Errorf("workspace dir is required")
+	}
+	if stateFactory, ok := any(b.factory).(sessionStateFactory); ok {
+		return stateFactory.BuildSessionState(agentName, workspaceDir)
+	}
+	return buildSessionStateFallback(workspaceDir)
+}
+
+func buildSessionStateFallback(workspaceDir string) (map[string]any, error) {
+	cwd := strings.TrimSpace(workspaceDir)
+	if cwd == "" {
+		return nil, fmt.Errorf("session cwd is empty")
+	}
+
+	absCWD, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("resolve session cwd %q: %w", cwd, err)
+	}
+	info, err := os.Stat(absCWD)
+	if err != nil {
+		return nil, fmt.Errorf("stat session cwd %q: %w", absCWD, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("session cwd %q is not a directory", absCWD)
+	}
+
+	return map[string]any{
+		sessionstate.CWDKey: absCWD,
+	}, nil
+}
+
 func modelFromAgentConfig(cfg agentconfig.Config) string {
 	switch strings.TrimSpace(cfg.Type) {
 	case agentconfig.AgentTypeGenericACP:
@@ -380,15 +528,4 @@ func modelFromAgentConfig(cfg agentconfig.Config) string {
 		}
 	}
 	return ""
-}
-
-func composeAgentInstructions(normaInstruction, relayInstruction string) string {
-	parts := make([]string, 0, 2)
-	if trimmedNorma := strings.TrimSpace(normaInstruction); trimmedNorma != "" {
-		parts = append(parts, trimmedNorma)
-	}
-	if trimmedRelay := strings.TrimSpace(relayInstruction); trimmedRelay != "" {
-		parts = append(parts, trimmedRelay)
-	}
-	return strings.Join(parts, "\n\n")
 }

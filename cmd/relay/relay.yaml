@@ -55,6 +55,6 @@ relay:
   # Removed built-in IDs such as runtime.state, relay.state, and relay.providers are rejected.
   mcp_servers: []
 
-  # Optional relay-specific system instructions applied to all sessions.
-  # Applied after runtime.providers.<provider_id>.system_instructions when both are set.
-  system_instructions: ""
+  # Optional relay-wide global instruction applied to all sessions.
+  # Applied before runtime.providers.<provider_id>.system_instructions when both are set.
+  global_instruction: ""

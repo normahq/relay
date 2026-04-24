@@ -7,7 +7,11 @@ import (
 	"testing"
 
 	"github.com/normahq/norma/pkg/runtime/agentconfig"
+	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
+	"github.com/normahq/norma/pkg/runtime/mcpregistry"
+	"github.com/normahq/norma/pkg/runtime/sessionstate"
+	adksession "google.golang.org/adk/session"
 )
 
 func TestBundledMCPServerIDs(t *testing.T) {
@@ -47,65 +51,7 @@ func TestMergeMCPServerIDs(t *testing.T) {
 	}
 }
 
-func TestComposeAgentInstructions(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name             string
-		normaInstruction string
-		relayInstruction string
-		want             string
-	}{
-		{
-			name:             "none",
-			normaInstruction: "",
-			relayInstruction: "",
-			want:             "",
-		},
-		{
-			name:             "norma_only",
-			normaInstruction: "norma",
-			relayInstruction: "",
-			want:             "norma",
-		},
-		{
-			name:             "relay_only",
-			normaInstruction: "",
-			relayInstruction: "relay",
-			want:             "relay",
-		},
-		{
-			name:             "both_norma_then_relay",
-			normaInstruction: "norma",
-			relayInstruction: "relay",
-			want:             "norma\n\nrelay",
-		},
-		{
-			name:             "trimmed",
-			normaInstruction: "  norma  ",
-			relayInstruction: "  relay  ",
-			want:             "norma\n\nrelay",
-		},
-		{
-			name:             "whitespace_only",
-			normaInstruction: "  \n\t",
-			relayInstruction: " ",
-			want:             "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := composeAgentInstructions(tt.normaInstruction, tt.relayInstruction)
-			if got != tt.want {
-				t.Fatalf("composeAgentInstructions(%q, %q) = %q, want %q", tt.normaInstruction, tt.relayInstruction, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildRelaySystemInstruction_ComposesAgentInstructions(t *testing.T) {
+func TestBuildRelayInstruction_IncludesGlobalAndAgentInstruction(t *testing.T) {
 	t.Parallel()
 
 	builder := &Builder{
@@ -116,10 +62,10 @@ func TestBuildRelaySystemInstruction_ComposesAgentInstructions(t *testing.T) {
 				},
 			},
 		},
-		relaySystemInstruction: "relay instruction",
+		relayGlobalInstruction: "relay instruction",
 	}
 
-	got := builder.buildRelaySystemInstruction(
+	got := builder.buildRelayInstruction(
 		"tg-1-2",
 		"telegram",
 		"alpha",
@@ -128,9 +74,9 @@ func TestBuildRelaySystemInstruction_ComposesAgentInstructions(t *testing.T) {
 		"main",
 	)
 
-	wantSnippet := "Agent-specific instructions:\nnorma instruction\n\nrelay instruction"
+	wantSnippet := "Global instruction:\nrelay instruction\n\nInstruction:\nnorma instruction"
 	if !strings.Contains(got, wantSnippet) {
-		t.Fatalf("buildRelaySystemInstruction() missing snippet %q in output:\n%s", wantSnippet, got)
+		t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", wantSnippet, got)
 	}
 }
 
@@ -155,11 +101,11 @@ func TestProviderIDs(t *testing.T) {
 	}
 }
 
-func TestBuildRelaySystemInstruction_OmitsAgentSpecificSectionWhenEmpty(t *testing.T) {
+func TestBuildRelayInstruction_OmitsInstructionSectionsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
 	builder := &Builder{}
-	got := builder.buildRelaySystemInstruction(
+	got := builder.buildRelayInstruction(
 		"tg-1-2",
 		"telegram",
 		"alpha",
@@ -168,12 +114,12 @@ func TestBuildRelaySystemInstruction_OmitsAgentSpecificSectionWhenEmpty(t *testi
 		"main",
 	)
 
-	if strings.Contains(got, "Agent-specific instructions:") {
-		t.Fatalf("buildRelaySystemInstruction() unexpectedly contained agent instructions block:\n%s", got)
+	if strings.Contains(got, "Global instruction:") || strings.Contains(got, "Instruction:") {
+		t.Fatalf("buildRelayInstruction() unexpectedly contained instruction block:\n%s", got)
 	}
 }
 
-func TestBuildRelaySystemInstruction_IncludesGitWorkspaceContext(t *testing.T) {
+func TestBuildRelayInstruction_IncludesGitWorkspaceContext(t *testing.T) {
 	t.Parallel()
 
 	builder := &Builder{
@@ -182,7 +128,7 @@ func TestBuildRelaySystemInstruction_IncludesGitWorkspaceContext(t *testing.T) {
 		workingDir:          "/repo",
 	}
 
-	got := builder.buildRelaySystemInstruction(
+	got := builder.buildRelayInstruction(
 		"tg-1-2",
 		"telegram",
 		"alpha",
@@ -204,19 +150,19 @@ func TestBuildRelaySystemInstruction_IncludesGitWorkspaceContext(t *testing.T) {
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(got, snippet) {
-			t.Fatalf("buildRelaySystemInstruction() missing snippet %q in output:\n%s", snippet, got)
+			t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", snippet, got)
 		}
 	}
 	if strings.Contains(got, "ask one short clarifying question") {
-		t.Fatalf("buildRelaySystemInstruction() unexpectedly included clarification mandate:\n%s", got)
+		t.Fatalf("buildRelayInstruction() unexpectedly included clarification mandate:\n%s", got)
 	}
 }
 
-func TestBuildRelaySystemInstruction_IncludesDirectModeSettingsWhenWorkspaceDisabled(t *testing.T) {
+func TestBuildRelayInstruction_IncludesDirectModeSettingsWhenWorkspaceDisabled(t *testing.T) {
 	t.Parallel()
 
 	builder := &Builder{workspaceEnabled: false, workingDir: "/repo"}
-	got := builder.buildRelaySystemInstruction(
+	got := builder.buildRelayInstruction(
 		"tg-1-2",
 		"telegram",
 		"alpha",
@@ -236,15 +182,68 @@ func TestBuildRelaySystemInstruction_IncludesDirectModeSettingsWhenWorkspaceDisa
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(got, snippet) {
-			t.Fatalf("buildRelaySystemInstruction() missing snippet %q in output:\n%s", snippet, got)
+			t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", snippet, got)
 		}
 	}
 
 	if strings.Contains(got, "Git workspace guidance:") {
-		t.Fatalf("buildRelaySystemInstruction() unexpectedly included git guidance in direct mode:\n%s", got)
+		t.Fatalf("buildRelayInstruction() unexpectedly included git guidance in direct mode:\n%s", got)
 	}
 	if strings.Contains(got, "Available namespaces:") {
-		t.Fatalf("buildRelaySystemInstruction() unexpectedly included generic MCP namespace docs:\n%s", got)
+		t.Fatalf("buildRelayInstruction() unexpectedly included generic MCP namespace docs:\n%s", got)
+	}
+}
+
+func TestCreateRuntimeSession_IncludesCanonicalCWDState(t *testing.T) {
+	t.Parallel()
+
+	providers := map[string]agentconfig.Config{
+		"alpha": {Type: "llm"},
+	}
+	builder := &Builder{
+		factory:  agentfactory.New(providers, mcpregistry.New(nil)),
+		normaCfg: runtimeconfig.RuntimeConfig{Providers: providers},
+	}
+	runtime := &BuiltRuntime{
+		SessionSvc: adksession.InMemoryService(),
+		AppName:    "norma-relay",
+	}
+
+	workspaceDir := t.TempDir()
+	sess, err := builder.CreateRuntimeSession(context.Background(), runtime, "alpha", "user-1", "s-1", workspaceDir)
+	if err != nil {
+		t.Fatalf("CreateRuntimeSession() error = %v", err)
+	}
+	gotCWD, err := sess.State().Get(sessionstate.CWDKey)
+	if err != nil {
+		t.Fatalf("session state get %q error = %v", sessionstate.CWDKey, err)
+	}
+	if gotCWD != workspaceDir {
+		t.Fatalf("session state %q = %v, want %q", sessionstate.CWDKey, gotCWD, workspaceDir)
+	}
+}
+
+func TestCreateRuntimeSession_InvalidCWD_FailsBeforeCreate(t *testing.T) {
+	t.Parallel()
+
+	providers := map[string]agentconfig.Config{
+		"alpha": {Type: agentconfig.AgentTypeGenericACP},
+	}
+	builder := &Builder{
+		factory:  agentfactory.New(providers, mcpregistry.New(nil)),
+		normaCfg: runtimeconfig.RuntimeConfig{Providers: providers},
+	}
+	runtime := &BuiltRuntime{
+		SessionSvc: adksession.InMemoryService(),
+		AppName:    "norma-relay",
+	}
+
+	_, err := builder.CreateRuntimeSession(context.Background(), runtime, "alpha", "user-1", "s-1", t.TempDir()+"/missing")
+	if err == nil {
+		t.Fatal("CreateRuntimeSession() error = nil, want invalid cwd error")
+	}
+	if !strings.Contains(err.Error(), "stat session cwd") {
+		t.Fatalf("CreateRuntimeSession() error = %q, want stat session cwd", err)
 	}
 }
 

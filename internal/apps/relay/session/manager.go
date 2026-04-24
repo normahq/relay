@@ -4,22 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/normahq/norma/pkg/runtime/agentconfig"
-	"github.com/normahq/norma/pkg/runtime/agentfactory"
-	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
-	"github.com/normahq/norma/pkg/runtime/mcpregistry"
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
-	"github.com/normahq/relay/internal/apps/relay/runtimecfg"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
 	"github.com/normahq/relay/internal/git"
 	"github.com/rs/zerolog"
 	"go.uber.org/fx"
+	adksession "google.golang.org/adk/session"
 )
 
 const cleanupTimeout = 10 * time.Second
@@ -29,20 +24,23 @@ const sessionStatusPersisted = "persisted"
 var ErrNoPersistedSession = errors.New("no persisted session")
 
 type agentBuilder interface {
-	BuildWithMCPServerIDs(
+	CreateRuntimeSession(
 		ctx context.Context,
-		sessionID string,
+		runtime *relayagent.BuiltRuntime,
+		agentName string,
 		userID string,
-		chatID int64,
-		topicID int,
-		agentName, workspaceDir string,
-		bundledMCPServerIDs []string,
-		extraMCPServerIDs []string,
-	) (*relayagent.BuiltAgent, error)
+		sessionID string,
+		workspaceDir string,
+	) (adksession.Session, error)
 	ValidateAgent(agentName string) error
 	GetAgentInfo(agentName string) (string, []string)
 	GetAgentMetadata(agentName string) relayagent.AgentMetadata
 	ProviderIDs() []string
+}
+
+type relayRuntimeManager interface {
+	Runtime(ctx context.Context) (*relayagent.BuiltRuntime, error)
+	ProviderID() string
 }
 
 type AgentMetadata = relayagent.AgentMetadata
@@ -50,22 +48,19 @@ type AgentMetadata = relayagent.AgentMetadata
 // Manager manages relay ADK sessions and persists session metadata.
 type Manager struct {
 	agentBuilder      agentBuilder
+	runtimeManager    relayRuntimeManager
 	relayMCPServerIDs []string
-	runtimeMCPIDs     map[string]struct{}
-	rootAgentName     string
+	relayProviderName string
 	workingDir        string
 	workspaces        *relayagent.WorkspaceManager
 	workspaceEnabled  bool
 	workspaceBaseRef  string
 	sessionStore      relaystate.SessionStore
-	mcpRegistry       mcpregistry.Registry
 	logger            zerolog.Logger
 
-	rootCtx    context.Context
-	rootCancel context.CancelFunc
-
-	mu       sync.RWMutex
-	sessions map[string]*TopicSession
+	mu              sync.RWMutex
+	sessions        map[string]*TopicSession
+	agentSessionSeq uint64
 }
 
 // ManagerParams provides dependencies for Manager.
@@ -74,15 +69,14 @@ type ManagerParams struct {
 
 	LC                fx.Lifecycle
 	AgentBuilder      *relayagent.Builder
+	RuntimeManager    *relayagent.RuntimeManager
 	RelayMCPServerIDs []string `name:"relay_mcp_servers"`
-	RuntimeMCPIDs     []string `name:"relay_runtime_mcp_server_ids"`
-	RootProviderID    string   `name:"relay_provider"`
+	RelayProviderID   string   `name:"relay_provider"`
 	WorkingDir        string
 	StateDir          string `name:"relay_state_dir"`
 	WorkspaceEnabled  bool   `name:"relay_workspace_enabled"`
 	WorkspaceBaseRef  string `name:"relay_workspace_base_branch"`
 	StateProvider     relaystate.Provider
-	MCPRegistry       *mcpregistry.MapRegistry
 	Logger            zerolog.Logger
 }
 
@@ -92,33 +86,27 @@ func NewManager(p ManagerParams) (*Manager, error) {
 		return nil, fmt.Errorf("relay state provider is required")
 	}
 
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-
 	m := &Manager{
 		agentBuilder:      p.AgentBuilder,
+		runtimeManager:    p.RuntimeManager,
 		relayMCPServerIDs: append([]string(nil), p.RelayMCPServerIDs...),
-		runtimeMCPIDs:     stringSet(p.RuntimeMCPIDs),
-		rootAgentName:     strings.TrimSpace(p.RootProviderID),
+		relayProviderName: strings.TrimSpace(p.RelayProviderID),
 		workingDir:        p.WorkingDir,
 		workspaces:        relayagent.NewWorkspaceManager(p.WorkingDir, p.StateDir, p.WorkspaceBaseRef),
 		workspaceEnabled:  p.WorkspaceEnabled,
 		workspaceBaseRef:  p.WorkspaceBaseRef,
 		sessionStore:      p.StateProvider.Sessions(),
-		mcpRegistry:       p.MCPRegistry,
 		logger:            p.Logger.With().Str("component", "relay.session_manager").Logger(),
-		rootCtx:           rootCtx,
-		rootCancel:        rootCancel,
 		sessions:          make(map[string]*TopicSession),
 	}
 
 	p.LC.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			m.logger.Info().Msg("session manager started")
+			m.logger.Info().Str("relay_provider", m.getProviderName()).Msg("session manager ready")
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
 			m.logger.Info().Int("active_sessions", len(m.sessions)).Msg("session manager stopping")
-			m.rootCancel()
 			m.stopAllWithContext(ctx)
 			return nil
 		},
@@ -151,7 +139,7 @@ func (m *Manager) GetAgentInfo(agentName string) (string, []string) {
 	return description, mergeUniqueStringIDs(mcpServers, relayMCPServerIDs)
 }
 
-// GetAgentMetadata returns root-provider metadata with provider-scoped MCP IDs.
+// GetAgentMetadata returns relay-provider metadata with provider-scoped MCP IDs.
 func (m *Manager) GetAgentMetadata(agentName string) AgentMetadata {
 	m.mu.RLock()
 	builder := m.agentBuilder
@@ -176,8 +164,8 @@ func (m *Manager) ProviderIDs() []string {
 	return builder.ProviderIDs()
 }
 
-// RootProviderID returns the configured relay root provider ID.
-func (m *Manager) RootProviderID() string {
+// RelayProviderID returns the configured relay provider ID.
+func (m *Manager) RelayProviderID() string {
 	return m.getProviderName()
 }
 
@@ -212,92 +200,6 @@ func mergeUniqueStringIDs(base, extra []string) []string {
 		appendUnique(id)
 	}
 
-	return out
-}
-
-func (m *Manager) extraMCPServerIDs() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if len(m.relayMCPServerIDs) == 0 {
-		return nil
-	}
-	return append([]string(nil), m.relayMCPServerIDs...)
-}
-
-// ApplyRuntimeConfig updates manager runtime configuration used for creating new sessions.
-func (m *Manager) ApplyRuntimeConfig(normaCfg runtimeconfig.RuntimeConfig, relayCfg runtimecfg.RelayConfig) error {
-	builder, err := m.rebuildAgentBuilder(normaCfg, relayCfg)
-	if err != nil {
-		return err
-	}
-
-	runtimeMCPIDs := sortedStringSetKeys(normaCfg.MCPServers)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.mcpRegistry != nil {
-		for id := range m.runtimeMCPIDs {
-			m.mcpRegistry.Delete(id)
-		}
-		for id, cfg := range normaCfg.MCPServers {
-			m.mcpRegistry.Set(id, cfg)
-		}
-	}
-	m.runtimeMCPIDs = stringSet(runtimeMCPIDs)
-	m.relayMCPServerIDs = append([]string(nil), relayCfg.MCPServers...)
-	m.rootAgentName = strings.TrimSpace(relayCfg.Provider)
-	m.agentBuilder = builder
-	return nil
-}
-
-func (m *Manager) rebuildAgentBuilder(normaCfg runtimeconfig.RuntimeConfig, relayCfg runtimecfg.RelayConfig) (*relayagent.Builder, error) {
-	factory := agentfactory.New(
-		normaCfg.Providers,
-		m.mcpRegistry,
-		agentfactory.WithPermissionHandler(relayagent.DefaultPermissionHandler),
-	)
-
-	return relayagent.NewBuilder(relayagent.BuilderParams{
-		Factory:                factory,
-		NormaCfg:               normaCfg,
-		WorkingDir:             m.workingDir,
-		WorkspaceEnabled:       m.workspaceEnabled,
-		WorkspaceBaseBranch:    m.workspaceBaseRef,
-		RelaySystemInstruction: relayCfg.SystemInstructions,
-	}), nil
-}
-
-func stringSet(values []string) map[string]struct{} {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		out[trimmed] = struct{}{}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func sortedStringSetKeys(values map[string]agentconfig.MCPServerConfig) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	for value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		out = append(out, trimmed)
-	}
-	sort.Strings(out)
 	return out
 }
 
@@ -356,25 +258,43 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		m.logger.Debug().Str("session_id", sessionID).Str("workspace", workspaceDir).Msg("workspace created")
 	}
 
-	extraMCPServerIDs := m.extraMCPServerIDs()
-	rootProvider := m.getProviderName()
-	if rootProvider == "" {
-		return fmt.Errorf("relay root provider is not configured")
+	runtimeManager := m.runtimeManager
+	if runtimeManager == nil {
+		if m.workspaceEnabled {
+			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
+		}
+		return fmt.Errorf("relay runtime manager is required")
 	}
 
-	built, err := builder.BuildWithMCPServerIDs(
-		m.rootCtx,
-		sessionID,
+	rootRuntime, err := runtimeManager.Runtime(ctx)
+	if err != nil {
+		if m.workspaceEnabled {
+			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
+		}
+		return err
+	}
+	relayProvider := strings.TrimSpace(runtimeManager.ProviderID())
+	if relayProvider == "" {
+		relayProvider = m.getProviderName()
+	}
+
+	agentSessionID := m.newAgentSessionID(sessionID)
+	sess, err := builder.CreateRuntimeSession(
+		ctx,
+		rootRuntime,
+		relayProvider,
 		userID,
-		chatID,
-		topicID,
-		rootProvider,
+		agentSessionID,
 		workspaceDir,
-		nil,
-		extraMCPServerIDs,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Str("session_id", sessionID).Str("agent", rootProvider).Str("label", agentName).Msg("failed to build agent")
+		m.logger.Error().
+			Err(err).
+			Str("session_id", sessionID).
+			Str("agent_session_id", agentSessionID).
+			Str("agent", relayProvider).
+			Str("label", agentName).
+			Msg("failed to create runtime session")
 		if m.workspaceEnabled {
 			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
 		}
@@ -382,26 +302,24 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 	}
 
 	ts := &TopicSession{
-		sessionID:    sessionID,
-		userID:       userID,
-		locator:      locator,
-		topicID:      topicID,
-		agentName:    agentName,
-		agent:        built.Agent,
-		runner:       built.Runner,
-		sessionSvc:   built.SessionSvc,
-		sess:         built.Session,
-		chatID:       chatID,
-		workspaceDir: workspaceDir,
-		branchName:   branchName,
+		sessionID:      sessionID,
+		agentSessionID: agentSessionID,
+		userID:         userID,
+		locator:        locator,
+		topicID:        topicID,
+		agentName:      agentName,
+		agent:          rootRuntime.Agent,
+		runner:         rootRuntime.Runner,
+		sessionSvc:     rootRuntime.SessionSvc,
+		sess:           sess,
+		chatID:         chatID,
+		workspaceDir:   workspaceDir,
+		branchName:     branchName,
 	}
 
 	if err := m.persistSessionRecord(ctx, ts, relaystate.SessionStatusActive); err != nil {
-		if closer, ok := ts.agent.(io.Closer); ok {
-			_ = closer.Close()
-		}
-		if m.workspaceEnabled && workspaceDir != "" {
-			_ = m.workspaces.CleanupWorkspace(ctx, workspaceDir)
+		if closeErr := m.closeTopicSession(ctx, ts); closeErr != nil {
+			m.logger.Warn().Err(closeErr).Str("session_id", sessionID).Msg("failed to rollback session after persist error")
 		}
 		return fmt.Errorf("persist session metadata: %w", err)
 	}
@@ -556,9 +474,9 @@ func (m *Manager) RestoreSession(ctx context.Context, sessionCtx SessionContext)
 // RestoreTelegramSession restores a Telegram session from persisted metadata.
 func (m *Manager) RestoreTelegramSession(ctx context.Context, chatID int64, topicID int, userID int64) (*TopicSession, error) {
 	return m.RestoreSession(ctx, SessionContext{
-		Locator:                   NewTelegramSessionLocator(chatID, topicID),
-		UserID:                    TelegramUserID(userID),
-		AllowRootProviderFallback: true,
+		Locator:                    NewTelegramSessionLocator(chatID, topicID),
+		UserID:                     TelegramUserID(userID),
+		AllowRelayProviderFallback: true,
 	})
 }
 
@@ -778,19 +696,41 @@ func sessionStatusForInactiveRecord(recordStatus string) string {
 }
 
 func (m *Manager) getProviderName() string {
+	if m.runtimeManager != nil {
+		if providerID := strings.TrimSpace(m.runtimeManager.ProviderID()); providerID != "" {
+			return providerID
+		}
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.rootAgentName
+	return m.relayProviderName
 }
 
 func (m *Manager) closeTopicSession(ctx context.Context, ts *TopicSession) error {
 	var firstErr error
-	if closer, ok := ts.agent.(io.Closer); ok {
-		if err := closer.Close(); err != nil {
-			firstErr = err
+	if ts != nil && ts.sessionSvc != nil {
+		sessionID := strings.TrimSpace(ts.GetAgentSessionID())
+		userID := strings.TrimSpace(ts.userID)
+		appName := "norma-relay"
+		if ts.sess != nil {
+			if sessionAppName := strings.TrimSpace(ts.sess.AppName()); sessionAppName != "" {
+				appName = sessionAppName
+			}
+			if sessionUserID := strings.TrimSpace(ts.sess.UserID()); sessionUserID != "" {
+				userID = sessionUserID
+			}
+		}
+		if sessionID != "" && userID != "" {
+			if err := ts.sessionSvc.Delete(ctx, &adksession.DeleteRequest{
+				AppName:   appName,
+				UserID:    userID,
+				SessionID: sessionID,
+			}); err != nil {
+				firstErr = fmt.Errorf("delete adk session: %w", err)
+			}
 		}
 	}
-	if m.workspaceEnabled && ts.workspaceDir != "" {
+	if ts != nil && m.workspaceEnabled && ts.workspaceDir != "" {
 		if err := m.workspaces.CleanupWorkspace(ctx, ts.workspaceDir); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -857,4 +797,9 @@ func (m *Manager) persistSessionRecord(ctx context.Context, ts *TopicSession, st
 		BranchName:   ts.branchName,
 		Status:       status,
 	})
+}
+
+func (m *Manager) newAgentSessionID(sessionID string) string {
+	seq := atomic.AddUint64(&m.agentSessionSeq, 1)
+	return fmt.Sprintf("%s-a%d", strings.TrimSpace(sessionID), seq)
 }

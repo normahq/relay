@@ -139,3 +139,41 @@ func TestEnsureBundledServers_RegistersSharedListenerURLs(t *testing.T) {
 		t.Fatal("shared host is empty")
 	}
 }
+
+func TestInternalMCPManagerEnsureStarted_IsIdempotent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	manager := &InternalMCPManager{
+		workspaceEnabled: false,
+		logger:           zerolog.Nop(),
+		registry:         mcpregistry.New(nil),
+		workingDir:       t.TempDir(),
+		sessionManager:   &session.Manager{},
+		stateStore:       sessionmcp.NewMemoryStore(),
+	}
+
+	if err := manager.EnsureStarted(ctx); err != nil {
+		t.Fatalf("EnsureStarted() first call error = %v", err)
+	}
+	firstCleanupCount := len(manager.cleanups)
+	if firstCleanupCount == 0 {
+		t.Fatal("EnsureStarted() did not register cleanup handlers")
+	}
+
+	if err := manager.EnsureStarted(ctx); err != nil {
+		t.Fatalf("EnsureStarted() second call error = %v", err)
+	}
+	if got := len(manager.cleanups); got != firstCleanupCount {
+		t.Fatalf("EnsureStarted() cleanup count = %d, want %d", got, firstCleanupCount)
+	}
+	if !manager.Started() {
+		t.Fatal("Started() = false, want true")
+	}
+
+	t.Cleanup(func() {
+		for i := len(manager.cleanups) - 1; i >= 0; i-- {
+			_ = manager.cleanups[i]()
+		}
+	})
+}

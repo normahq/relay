@@ -70,7 +70,7 @@ relay:
     mode: "auto"
     base_branch: ""
   mcp_servers: []
-  system_instructions: ""
+  global_instruction: ""
 profiles: {}
 ```
 

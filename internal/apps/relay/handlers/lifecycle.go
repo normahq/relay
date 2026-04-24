@@ -27,6 +27,7 @@ type InternalMCPManager struct {
 	workspaceEnabled bool
 	started          bool
 	mu               sync.RWMutex
+	startMu          sync.Mutex
 	logger           zerolog.Logger
 	registry         mcpregistry.Registry
 	workingDir       string
@@ -86,16 +87,7 @@ func NewInternalMCPManager(params internalMCPParams) *InternalMCPManager {
 
 	params.LC.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			manager.logger.Info().Msg("starting bundled internal MCP servers")
-
-			if err := manager.ensureBundledServers(ctx); err != nil {
-				return fmt.Errorf("ensuring bundled servers: %w", err)
-			}
-
-			manager.mu.Lock()
-			manager.started = true
-			manager.mu.Unlock()
-			return nil
+			return manager.EnsureStarted(ctx)
 		},
 		OnStop: func(ctx context.Context) error {
 			manager.mu.Lock()
@@ -114,6 +106,29 @@ func NewInternalMCPManager(params internalMCPParams) *InternalMCPManager {
 	})
 
 	return manager
+}
+
+// EnsureStarted initializes bundled MCP servers exactly once.
+func (m *InternalMCPManager) EnsureStarted(ctx context.Context) error {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+
+	m.mu.RLock()
+	if m.started {
+		m.mu.RUnlock()
+		return nil
+	}
+	m.mu.RUnlock()
+
+	m.logger.Info().Msg("starting bundled internal MCP servers")
+	if err := m.ensureBundledServers(ctx); err != nil {
+		return fmt.Errorf("ensuring bundled servers: %w", err)
+	}
+
+	m.mu.Lock()
+	m.started = true
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *InternalMCPManager) ensureBundledServers(ctx context.Context) error {

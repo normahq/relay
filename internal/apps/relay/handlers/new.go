@@ -19,7 +19,7 @@ import (
 type commandSessionManager interface {
 	CreateSession(ctx context.Context, sessionCtx session.SessionContext, agentName string) error
 	GetAgentMetadata(agentName string) session.AgentMetadata
-	RootProviderID() string
+	RelayProviderID() string
 	StopSession(locator session.SessionLocator)
 }
 
@@ -111,8 +111,8 @@ func (h *CommandHandler) onTopicCommand(ctx context.Context, commandCtx relaytel
 		}
 		return nil
 	}
-	rootProviderID := strings.TrimSpace(h.sessionManager.RootProviderID())
-	if rootProviderID == "" {
+	relayProviderID := strings.TrimSpace(h.sessionManager.RelayProviderID())
+	if relayProviderID == "" {
 		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "relay.provider is not configured."); err != nil {
 			return err
 		}
@@ -145,7 +145,7 @@ func (h *CommandHandler) onTopicCommand(ctx context.Context, commandCtx relaytel
 		return nil
 	}
 
-	metadata := h.sessionManager.GetAgentMetadata(rootProviderID)
+	metadata := h.sessionManager.GetAgentMetadata(relayProviderID)
 
 	welcomeMsg := BuildAgentWelcomeMessage(topicName, topicLocator.SessionID, metadata.Type, metadata.Model, metadata.MCPServers)
 	if err := h.channel.SendMarkdown(ctx, topicLocator, welcomeMsg); err != nil {
@@ -195,7 +195,7 @@ func (h *CommandHandler) onCloseCommand(ctx context.Context, commandCtx relaytel
 	if h.turnDispatcher != nil {
 		_, _, _ = h.turnDispatcher.CancelSession(commandCtx.Locator, true)
 	}
-	if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Stopping root provider session. It will be recreated on your next message."); err != nil {
+	if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Stopping relay provider session. It will be recreated on your next message."); err != nil {
 		log.Warn().Err(err).Int64("chat_id", commandCtx.ChatID).Msg("failed to send /close root confirmation")
 	}
 	h.sessionManager.StopSession(commandCtx.Locator)

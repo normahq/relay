@@ -34,7 +34,10 @@ Git workspace guidance:
 - If export reports a base-branch mismatch, ask the user to switch the main repository back to the configured base branch.
 {{else}}
 - Git workspace tooling: disabled (`relay.workspace` MCP namespace is unavailable in this session).
-{{end}}{{if .AgentInstructions}}
+{{end}}{{if .GlobalInstruction}}
 
-Agent-specific instructions:
-{{.AgentInstructions}}{{end}}
+Global instruction:
+{{.GlobalInstruction}}{{end}}{{if .Instruction}}
+
+Instruction:
+{{.Instruction}}{{end}}

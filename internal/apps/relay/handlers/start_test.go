@@ -275,7 +275,7 @@ func TestStartHandlerOnCommand_RelayActivationFailure_DoesNotClaimRelayActive(t 
 		t.Fatal("owner not registered")
 	}
 	assertLastSentContains(t, tgClient, "Congratulations")
-	assertLastSentContains(t, tgClient, "Failed to start root provider session: precreate failed.")
+	assertLastSentContains(t, tgClient, "Failed to start relay provider session: precreate failed.")
 	assertLastSentNotContains(t, tgClient, "Relay mode is active.")
 }
 
@@ -301,7 +301,7 @@ func TestStartHandlerOnCommand_ExistingOwnerActivationFailure_DoesNotClaimRelayA
 		t.Fatalf("ActivateOwner calls = %d, want 1", len(relay.calls))
 	}
 	assertLastSentContains(t, tgClient, "You are already registered as the bot owner.")
-	assertLastSentContains(t, tgClient, "Failed to start root provider session: precreate failed.")
+	assertLastSentContains(t, tgClient, "Failed to start relay provider session: precreate failed.")
 	assertLastSentNotContains(t, tgClient, "Relay mode is active.")
 }
 
@@ -477,7 +477,7 @@ func TestActivateOwner_BootstrapsRootSession(t *testing.T) {
 			t.Fatalf("onCommand(): %v", err)
 		}
 
-		assertLastSentContains(t, tgClient, "Failed to start root provider session: config reload failed.")
+		assertLastSentContains(t, tgClient, "Failed to start relay provider session: config reload failed.")
 		assertLastSentNotContains(t, tgClient, "Relay mode is active.")
 	})
 }

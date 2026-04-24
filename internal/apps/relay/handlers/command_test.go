@@ -63,7 +63,7 @@ func TestCommandHandlerOnCommand_CloseRootStopsOnlySession(t *testing.T) {
 	if sm.stopCalls[0].SessionID != "tg-9001-0" {
 		t.Fatalf("StopSession call = %+v, want session=tg-9001-0", sm.stopCalls[0])
 	}
-	assertLastSentContains(t, tgClient, "Stopping root provider session.")
+	assertLastSentContains(t, tgClient, "Stopping relay provider session.")
 }
 
 func TestCommandHandlerOnCommand_CloseWithArgsShowsUsage(t *testing.T) {
@@ -234,9 +234,9 @@ func TestCommandHandlerOnCommand_TopicCollaboratorAllowed(t *testing.T) {
 	assertLastSentContains(t, tgClient, "ops run")
 }
 
-func TestCommandHandlerOnCommand_TopicNoRootProvider_ShowsError(t *testing.T) {
+func TestCommandHandlerOnCommand_TopicNoRelayProvider_ShowsError(t *testing.T) {
 	handler, sm, turns, tgClient := newCommandHandlerTestHarness(t)
-	sm.rootProvider = ""
+	sm.relayProvider = ""
 
 	err := handler.onCommand(context.Background(), newCommandEvent("topic", "alpha", 101, 9001, nil))
 	if err != nil {
@@ -347,10 +347,10 @@ func TestCommandHandlerOnCommand_CancelCollaboratorAllowed(t *testing.T) {
 }
 
 type fakeCommandSessionManager struct {
-	stopCalls    []stopSessionCall
-	createCalls  []createSessionCall
-	rootProvider string
-	metadata     session.AgentMetadata
+	stopCalls     []stopSessionCall
+	createCalls   []createSessionCall
+	relayProvider string
+	metadata      session.AgentMetadata
 }
 
 type createSessionCall struct {
@@ -381,8 +381,8 @@ func (f *fakeCommandSessionManager) GetAgentMetadata(string) session.AgentMetada
 	return f.metadata
 }
 
-func (f *fakeCommandSessionManager) RootProviderID() string {
-	return f.rootProvider
+func (f *fakeCommandSessionManager) RelayProviderID() string {
+	return f.relayProvider
 }
 
 func (f *fakeCommandSessionManager) StopSession(locator session.SessionLocator) {
@@ -435,7 +435,7 @@ func newCommandHandlerTestHarness(t *testing.T) (*CommandHandler, *fakeCommandSe
 	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
 	sessionManager := &fakeCommandSessionManager{}
 	turnDispatcher := &fakeTurnDispatcher{}
-	sessionManager.rootProvider = testProviderAlpha
+	sessionManager.relayProvider = testProviderAlpha
 	sessionManager.metadata = session.AgentMetadata{
 		Type:       "opencode_acp",
 		Model:      "gpt-5",

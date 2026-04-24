@@ -8,81 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/agentconfig"
-	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
-	"github.com/normahq/norma/pkg/runtime/mcpregistry"
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
-	"github.com/normahq/relay/internal/apps/relay/runtimecfg"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
 	"github.com/rs/zerolog"
+	adksession "google.golang.org/adk/session"
 )
-
-func TestApplyRuntimeConfig_RebuildsAgentBuilderAndMCPRegistry(t *testing.T) {
-	registry := mcpregistry.New(map[string]agentconfig.MCPServerConfig{
-		"relay": {
-			Type: agentconfig.MCPServerTypeHTTP,
-			URL:  "http://127.0.0.1:9090/mcp",
-		},
-		"old.server": {
-			Type: agentconfig.MCPServerTypeHTTP,
-			URL:  "http://127.0.0.1:9091/mcp",
-		},
-	})
-
-	m := &Manager{
-		workingDir:        t.TempDir(),
-		workspaceEnabled:  false,
-		workspaceBaseRef:  "main",
-		mcpRegistry:       registry,
-		relayMCPServerIDs: []string{"old.extra"},
-		runtimeMCPIDs:     stringSet([]string{"old.server"}),
-		logger:            zerolog.Nop(),
-	}
-
-	cfg := runtimeconfig.RuntimeConfig{
-		Providers: map[string]agentconfig.Config{
-			"fresh": {
-				Type: "opencode_acp",
-				OpenCodeACP: &agentconfig.ACPConfig{
-					Model: "opencode/big-pickle",
-				},
-			},
-		},
-		MCPServers: map[string]agentconfig.MCPServerConfig{
-			"new.server": {
-				Type: agentconfig.MCPServerTypeHTTP,
-				URL:  "http://127.0.0.1:9092/mcp",
-			},
-		},
-	}
-
-	if err := m.ApplyRuntimeConfig(cfg, runtimecfg.RelayConfig{
-		Provider: "fresh",
-		MCPServers: []string{
-			"relay.extra",
-		},
-	}); err != nil {
-		t.Fatalf("ApplyRuntimeConfig() error = %v", err)
-	}
-
-	if _, ok := registry.Get("old.server"); ok {
-		t.Fatal("old runtime MCP server still exists after ApplyRuntimeConfig")
-	}
-	if _, ok := registry.Get("new.server"); !ok {
-		t.Fatal("new runtime MCP server missing after ApplyRuntimeConfig")
-	}
-
-	if err := m.ValidateAgent("fresh"); err != nil {
-		t.Fatalf("ValidateAgent(fresh) error = %v", err)
-	}
-	_, mcpServers := m.GetAgentInfo("fresh")
-	if got := strings.Join(mcpServers, ","); got != "relay,relay.extra" {
-		t.Fatalf("GetAgentInfo(fresh) mcp servers = %q, want relay,relay.extra", got)
-	}
-	if got := m.getProviderName(); got != "fresh" {
-		t.Fatalf("root provider = %q, want fresh", got)
-	}
-}
 
 func TestStopAll_CleansWorkspaceWhenRootContextCanceled(t *testing.T) {
 	ctx := context.Background()
@@ -96,14 +26,10 @@ func TestStopAll_CleansWorkspaceWhenRootContextCanceled(t *testing.T) {
 	workspaceDir := filepath.Join(t.TempDir(), "relay-workspace")
 	runGit(t, ctx, workingDir, "worktree", "add", "-b", "norma/relay/tg-1-1", workspaceDir, "HEAD")
 
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-	rootCancel()
-
 	m := &Manager{
 		workspaces:       relayagent.NewWorkspaceManager(workingDir, t.TempDir(), "master"),
 		workspaceEnabled: true,
 		logger:           zerolog.Nop(),
-		rootCtx:          rootCtx,
 		sessions: map[string]*TopicSession{
 			"tg-1-1": {
 				sessionID:    "tg-1-1",
@@ -121,13 +47,9 @@ func TestStopAll_CleansWorkspaceWhenRootContextCanceled(t *testing.T) {
 }
 
 func TestStopSession_UsesNonCanceledCleanupContext(t *testing.T) {
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-	rootCancel()
-
 	store := &fakeSessionStore{}
 	m := &Manager{
 		logger:       zerolog.Nop(),
-		rootCtx:      rootCtx,
 		sessionStore: store,
 		sessions: map[string]*TopicSession{
 			"tg-10-42": {
@@ -224,21 +146,6 @@ func TestHasSession(t *testing.T) {
 			t.Fatal("HasSession() = true, want false for non-active persisted session")
 		}
 	})
-}
-
-func TestExtraMCPServerIDs_ForAllSessions(t *testing.T) {
-	m := &Manager{relayMCPServerIDs: []string{"srv.one", "srv.two"}}
-
-	got := m.extraMCPServerIDs()
-	if strings.Join(got, ",") != "srv.one,srv.two" {
-		t.Fatalf("extraMCPServerIDs() = %#v, want [srv.one srv.two]", got)
-	}
-
-	// Ensure returned slice is detached.
-	got[0] = "mutated"
-	if m.relayMCPServerIDs[0] != "srv.one" {
-		t.Fatalf("relayMCPServerIDs mutated through returned slice: %#v", m.relayMCPServerIDs)
-	}
 }
 
 func TestMergeUniqueStringIDs(t *testing.T) {
@@ -421,19 +328,27 @@ func TestStopSessionByID_PersistedSessionCleansWorkspace(t *testing.T) {
 }
 
 type fakeAgentBuilder struct {
-	lastBuiltAgentName string
+	createRuntimeSessionAgentNames    []string
+	createRuntimeSessionUserIDs       []string
+	createRuntimeSessionSessionIDs    []string
+	createRuntimeSessionWorkspaceDirs []string
+	createRuntimeSessionErr           error
 }
 
-func (f *fakeAgentBuilder) BuildWithMCPServerIDs(
+func (f *fakeAgentBuilder) CreateRuntimeSession(
 	_ context.Context,
-	_, _ string,
-	_ int64,
-	_ int,
-	agentName, _ string,
-	_, _ []string,
-) (*relayagent.BuiltAgent, error) {
-	f.lastBuiltAgentName = agentName
-	return &relayagent.BuiltAgent{}, nil
+	_ *relayagent.BuiltRuntime,
+	agentName string,
+	userID, sessionID, workspaceDir string,
+) (adksession.Session, error) {
+	f.createRuntimeSessionAgentNames = append(f.createRuntimeSessionAgentNames, agentName)
+	f.createRuntimeSessionUserIDs = append(f.createRuntimeSessionUserIDs, userID)
+	f.createRuntimeSessionSessionIDs = append(f.createRuntimeSessionSessionIDs, sessionID)
+	f.createRuntimeSessionWorkspaceDirs = append(f.createRuntimeSessionWorkspaceDirs, workspaceDir)
+	if f.createRuntimeSessionErr != nil {
+		return nil, f.createRuntimeSessionErr
+	}
+	return nil, nil
 }
 
 func (f *fakeAgentBuilder) ValidateAgent(agentName string) error {
@@ -452,14 +367,87 @@ func (f *fakeAgentBuilder) GetAgentMetadata(string) relayagent.AgentMetadata {
 	return relayagent.AgentMetadata{}
 }
 
-func TestCreateSession_UsesRootProviderBackend(t *testing.T) {
+type fakeRelayRuntimeManager struct {
+	providerID   string
+	runtime      *relayagent.BuiltRuntime
+	runtimeErr   error
+	runtimeCalls int
+}
+
+func (f *fakeRelayRuntimeManager) Runtime(context.Context) (*relayagent.BuiltRuntime, error) {
+	f.runtimeCalls++
+	if f.runtimeErr != nil {
+		return nil, f.runtimeErr
+	}
+	if f.runtime != nil {
+		return f.runtime, nil
+	}
+	return &relayagent.BuiltRuntime{}, nil
+}
+
+func (f *fakeRelayRuntimeManager) ProviderID() string {
+	return f.providerID
+}
+
+func TestCreateSession_ReusesSingleRuntimeAndMapsAgentSessions(t *testing.T) {
 	builder := &fakeAgentBuilder{}
+	runtimeManager := &fakeRelayRuntimeManager{providerID: "relay-provider"}
 	m := &Manager{
-		rootAgentName: "root-provider",
-		agentBuilder:  builder,
-		logger:        zerolog.Nop(),
-		sessions:      make(map[string]*TopicSession),
-		sessionStore:  &fakeSessionStore{},
+		relayProviderName: "relay-provider",
+		runtimeManager:    runtimeManager,
+		agentBuilder:      builder,
+		workingDir:        t.TempDir(),
+		logger:            zerolog.Nop(),
+		sessions:          make(map[string]*TopicSession),
+		sessionStore:      &fakeSessionStore{},
+	}
+
+	first := SessionContext{
+		Locator: NewTelegramSessionLocator(10, 41),
+		UserID:  "tg-201",
+	}
+	second := SessionContext{
+		Locator: NewTelegramSessionLocator(10, 42),
+		UserID:  "tg-202",
+	}
+
+	if err := m.CreateSession(context.Background(), first, "topic-a"); err != nil {
+		t.Fatalf("CreateSession(first) error = %v", err)
+	}
+	if err := m.CreateSession(context.Background(), second, "topic-b"); err != nil {
+		t.Fatalf("CreateSession(second) error = %v", err)
+	}
+
+	if runtimeManager.runtimeCalls != 2 {
+		t.Fatalf("Runtime() calls = %d, want 2", runtimeManager.runtimeCalls)
+	}
+	if got := len(builder.createRuntimeSessionSessionIDs); got != 2 {
+		t.Fatalf("CreateRuntimeSession calls = %d, want 2", got)
+	}
+
+	firstSessionID := builder.createRuntimeSessionSessionIDs[0]
+	secondSessionID := builder.createRuntimeSessionSessionIDs[1]
+	if firstSessionID == secondSessionID {
+		t.Fatalf("agent session ids are equal (%q), want unique per relay session", firstSessionID)
+	}
+	if !strings.HasPrefix(firstSessionID, first.Locator.SessionID+"-a") {
+		t.Fatalf("first agent session id = %q, want prefix %q", firstSessionID, first.Locator.SessionID+"-a")
+	}
+	if !strings.HasPrefix(secondSessionID, second.Locator.SessionID+"-a") {
+		t.Fatalf("second agent session id = %q, want prefix %q", secondSessionID, second.Locator.SessionID+"-a")
+	}
+}
+
+func TestCreateSession_UsesRelayProviderBackend(t *testing.T) {
+	builder := &fakeAgentBuilder{}
+	runtimeManager := &fakeRelayRuntimeManager{providerID: "relay-provider"}
+	m := &Manager{
+		relayProviderName: "relay-provider",
+		runtimeManager:    runtimeManager,
+		agentBuilder:      builder,
+		logger:            zerolog.Nop(),
+		sessions:          make(map[string]*TopicSession),
+		sessionStore:      &fakeSessionStore{},
 	}
 
 	err := m.CreateSession(context.Background(), SessionContext{
@@ -471,8 +459,8 @@ func TestCreateSession_UsesRootProviderBackend(t *testing.T) {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 
-	if builder.lastBuiltAgentName != "root-provider" {
-		t.Fatalf("built with agent %q, want %q", builder.lastBuiltAgentName, "root-provider")
+	if got, want := builder.createRuntimeSessionAgentNames[0], "relay-provider"; got != want {
+		t.Fatalf("CreateRuntimeSession provider = %q, want %q", got, want)
 	}
 
 	ts := m.sessions[NewTelegramSessionLocator(10, 42).SessionID]
@@ -481,8 +469,9 @@ func TestCreateSession_UsesRootProviderBackend(t *testing.T) {
 	}
 }
 
-func TestRestoreSession_AlwaysUsesCurrentRootProviderBackend(t *testing.T) {
+func TestRestoreSession_AlwaysUsesCurrentRelayProviderBackend(t *testing.T) {
 	builder := &fakeAgentBuilder{}
+	runtimeManager := &fakeRelayRuntimeManager{providerID: "new-relay-provider"}
 	locator := NewTelegramSessionLocator(10, 42)
 	store := &fakeSessionStore{
 		recordsByAddress: map[string]relaystate.SessionRecord{
@@ -498,25 +487,26 @@ func TestRestoreSession_AlwaysUsesCurrentRootProviderBackend(t *testing.T) {
 	}
 
 	m := &Manager{
-		rootAgentName: "new-root-provider",
-		agentBuilder:  builder,
-		logger:        zerolog.Nop(),
-		sessions:      make(map[string]*TopicSession),
-		sessionStore:  store,
+		relayProviderName: "new-relay-provider",
+		runtimeManager:    runtimeManager,
+		agentBuilder:      builder,
+		logger:            zerolog.Nop(),
+		sessions:          make(map[string]*TopicSession),
+		sessionStore:      store,
 	}
 
 	_, err := m.RestoreSession(context.Background(), SessionContext{
-		Locator:                   locator,
-		UserID:                    "tg-201",
-		AllowRootProviderFallback: true,
+		Locator:                    locator,
+		UserID:                     "tg-201",
+		AllowRelayProviderFallback: true,
 	})
 
 	if err != nil {
 		t.Fatalf("RestoreSession() error = %v", err)
 	}
 
-	if builder.lastBuiltAgentName != "new-root-provider" {
-		t.Fatalf("built with agent %q, want %q", builder.lastBuiltAgentName, "new-root-provider")
+	if got, want := builder.createRuntimeSessionAgentNames[0], "new-relay-provider"; got != want {
+		t.Fatalf("CreateRuntimeSession provider = %q, want %q", got, want)
 	}
 
 	ts := m.sessions[locator.SessionID]
@@ -527,6 +517,7 @@ func TestRestoreSession_AlwaysUsesCurrentRootProviderBackend(t *testing.T) {
 
 func TestRestoreSession_UsesAutoLabelWhenPersistedLabelMissing(t *testing.T) {
 	builder := &fakeAgentBuilder{}
+	runtimeManager := &fakeRelayRuntimeManager{providerID: "new-relay-provider"}
 	locator := NewTelegramSessionLocator(11, 43)
 	store := &fakeSessionStore{
 		recordsByAddress: map[string]relaystate.SessionRecord{
@@ -542,11 +533,12 @@ func TestRestoreSession_UsesAutoLabelWhenPersistedLabelMissing(t *testing.T) {
 	}
 
 	m := &Manager{
-		rootAgentName: "new-root-provider",
-		agentBuilder:  builder,
-		logger:        zerolog.Nop(),
-		sessions:      make(map[string]*TopicSession),
-		sessionStore:  store,
+		relayProviderName: "new-relay-provider",
+		runtimeManager:    runtimeManager,
+		agentBuilder:      builder,
+		logger:            zerolog.Nop(),
+		sessions:          make(map[string]*TopicSession),
+		sessionStore:      store,
 	}
 
 	_, err := m.RestoreSession(context.Background(), SessionContext{

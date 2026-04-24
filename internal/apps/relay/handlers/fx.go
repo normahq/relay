@@ -13,6 +13,7 @@ import (
 var Module = fx.Module("relay_handlers",
 	fx.Provide(
 		agent.NewBuilder,
+		agent.NewRuntimeManager,
 		session.NewManager,
 		messenger.NewMessenger,
 		relaytelegram.NewAdapter,

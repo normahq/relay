@@ -309,7 +309,7 @@ func (h *StartHandler) activateRelay(ctx context.Context, ownerID, chatID int64)
 
 func relayStartFailureMessage(err error) string {
 	return fmt.Sprintf(
-		"Failed to start root provider session: %v.\nPlease verify relay root-provider configuration, then send /start again or restart relay.",
+		"Failed to start relay provider session: %v.\nPlease verify relay provider configuration, then send /start again or restart relay.",
 		err,
 	)
 }

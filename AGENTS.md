@@ -25,7 +25,7 @@ go tool golangci-lint run
 
 ## Relay Guardrails
 
-- Keep Relay startup order strict: config load -> bundled MCP lifecycle -> root provider -> channel runtime.
+- Keep Relay startup order strict: config load -> bundled MCP lifecycle -> relay provider -> channel runtime.
 - Keep channel/session boundaries stable (`chat_id`, `topic_id`) and preserve lazy restore semantics.
 - Keep workspace mode behavior stable (`on|off|auto`) with safe defaults and explicit failures.
 - Keep Relay MCP/server contracts backward compatible (`relay.workspace.*` and alias tools).
@@ -34,7 +34,7 @@ go tool golangci-lint run
 ## Bot Commands (Current Contract)
 
 - `/start <owner_token>`: direct message only; owner authentication/bootstrap entrypoint, also used for invite-token collaborator onboarding.
-- `/topic <name>`: owner/collaborator, direct message only; creates a topic session labeled `<name>` using the configured root provider.
+- `/topic <name>`: owner/collaborator, direct message only; creates a topic session labeled `<name>` using the configured relay provider.
 - `/close`: owner/collaborator, direct message only; closes a topic session or stops the root session.
 - `/cancel`: owner/collaborator; cancels in-flight turn processing for the current session and drops queued turns.
 - `/user add|list|remove <user_id>`: owner only; collaborator invite and management commands.
