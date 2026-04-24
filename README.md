@@ -92,6 +92,7 @@ profiles: {}
 ## Documentation
 
 - Technical specification: [`docs/relay.md`](docs/relay.md)
+- Telegram formatting guide: [`docs/telegram-formatting.md`](docs/telegram-formatting.md)
 - Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Agent workflow/policies: [`AGENTS.md`](AGENTS.md)
 
