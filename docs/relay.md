@@ -10,7 +10,7 @@
 - Subagents: one session per Telegram topic (`message_thread_id`) with dedicated git worktree.
 - Relay startup prompt includes workspace settings for each session; in git workspace mode it also includes session/base/current-branch context and workspace MCP guidance.
 - Output streaming:
-  - Progress updates: non-terminal ADK events emit channel progress. Telegram maps this to throttled Bot API `sendChatAction` with `typing` for all chats, plus DM-only `sendMessageDraft` thinking placeholders.
+  - Progress updates: non-terminal ADK events emit channel progress. Telegram maps this to throttled Bot API `sendChatAction` with `typing` for all chats, plus throttled DM-only `sendMessageDraft` thinking placeholders.
   - Final assistant response: Telegram Bot API `sendMessage` with `relay.telegram.formatting_mode` (`markdownv2|html|none`; default `markdownv2`).
 - Auth model: one-time owner authorization with startup-generated token.
 
@@ -274,7 +274,7 @@ Relay lazy-restores regular sessions on first message after restart when metadat
 
 Per model turn:
 
-1. Non-terminal ADK events send throttled `sendChatAction` with `typing` for the same chat/topic; DM chats also emit plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
+1. Non-terminal ADK events send throttled `sendChatAction` with `typing` for the same chat/topic; DM chats also emit throttled plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
 2. Final assistant text is sent with `sendMessage` using `relay.telegram.formatting_mode`:
    - `markdownv2`: model writes Markdown/plain text; Relay converts it to Telegram MarkdownV2, preserves line breaks, and sends with `parse_mode=MarkdownV2`.
    - `html`: model writes Telegram HTML; Relay sends text with `parse_mode=HTML`.
@@ -326,6 +326,6 @@ Relay runs with a single provider per process (`relay.provider`).
 6. `/topic` without name returns usage error.
 7. Restart clears in-memory sessions but topic sessions are lazy-restored from persisted metadata.
 8. Polling mode resumes from persisted Telegram offset in relay state DB.
-9. Non-terminal ADK event progress sends throttled `typing` chat actions in DM and public chats; `sendMessageDraft` thinking placeholders are DM-only.
+9. Non-terminal ADK event progress sends throttled `typing` chat actions in DM and public chats; throttled `sendMessageDraft` thinking placeholders are DM-only.
 10. Final assistant response is sent with `sendMessage` using configured `relay.telegram.formatting_mode` with fallback retry without `parse_mode` on transport or parse/escaping API errors.
 11. `/close` in a topic closes that topic and stops the session; `/close` in the owner DM main chat stops only the owner session.

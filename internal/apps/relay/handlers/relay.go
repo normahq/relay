@@ -34,9 +34,9 @@ type relayAuthorizer struct {
 }
 
 const (
-	ownerSessionLabel              = "relay"
-	autoSessionLabel               = "auto"
-	telegramTypingThrottleInterval = 4 * time.Second
+	ownerSessionLabel                = "relay"
+	autoSessionLabel                 = "auto"
+	telegramProgressThrottleInterval = 4 * time.Second
 )
 
 func (a *relayAuthorizer) IsOwner(userID int64) bool {
@@ -529,7 +529,8 @@ func (h *RelayHandler) runTurn(
 	sawTurnComplete := false
 	thinkingStages := []string{"Thinking.", "Thinking..", "Thinking..."}
 	thinkingIdx := 0
-	typingThrottle := throttle.New(telegramTypingThrottleInterval, throttle.WithClock(h.currentTime))
+	typingThrottle := throttle.New(telegramProgressThrottleInterval, throttle.WithClock(h.currentTime))
+	thinkingThrottle := throttle.New(telegramProgressThrottleInterval, throttle.WithClock(h.currentTime))
 
 	for ev, err := range r.Run(runCtx, userID, agentSessionID, userContent, agent.RunConfig{}) {
 		if err != nil {
@@ -547,10 +548,12 @@ func (h *RelayHandler) runTurn(
 				})
 			}
 			if progressPolicy.Thinking {
-				if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
-					log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send thinking draft")
-				}
-				thinkingIdx++
+				thinkingThrottle.Do(func() {
+					if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
+						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send thinking draft")
+					}
+					thinkingIdx++
+				})
 			}
 		}
 		contentRole := ""
