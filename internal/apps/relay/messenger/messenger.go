@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	gohtml "html"
 	"net/http"
 	"strings"
 	"time"
@@ -41,7 +40,7 @@ func (m *Messenger) SendDraftPlain(ctx context.Context, chatID int64, draftID in
 	m.logger.Debug().
 		Int64("chat_id", chatID).
 		Int("draft_id", draftID).
-		Str("text_escaped", gohtml.EscapeString(text)).
+		Str("draft_text", text).
 		Msg("sending plain draft")
 	req := client.SendMessageDraftJSONRequestBody{
 		ChatId:  chatID,
@@ -89,7 +88,7 @@ func (m *Messenger) SendMarkdown(ctx context.Context, chatID int64, text string,
 		m.logger.Warn().Err(err).Msg("failed to convert markdown to telegram format, falling back to escaped literal")
 		return m.sendMessageWithMode(ctx, chatID, escapeMarkdownV2(text), topicID, "MarkdownV2", "send message with MarkdownV2")
 	}
-	return m.sendMessageWithMode(ctx, chatID, buf.String(), topicID, "MarkdownV2", "send message with MarkdownV2")
+	return m.sendMessageWithMode(ctx, chatID, cleanTelegramMarkdownV2Payload(buf.String()), topicID, "MarkdownV2", "send message with MarkdownV2")
 }
 
 // SendAgentReply sends final model output with relay.telegram.formatting_mode.
@@ -108,7 +107,7 @@ func (m *Messenger) sendMessageWithMode(ctx context.Context, chatID int64, text 
 	m.logger.Debug().
 		Int64("chat_id", chatID).
 		Str("mode", mode).
-		Str("text_escaped", gohtml.EscapeString(text)).
+		Str("telegram_payload", text).
 		Msg("sending telegram message")
 	req := client.SendMessageJSONRequestBody{
 		ChatId: chatID,
@@ -164,6 +163,43 @@ func isTelegramParseEntitiesError(description string) bool {
 		return true
 	}
 	return strings.Contains(desc, "parse entities") && strings.Contains(desc, "entity")
+}
+
+func cleanTelegramMarkdownV2Payload(text string) string {
+	text = strings.Trim(text, "\r\n")
+	if text == "" {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	inFence := false
+	for i, line := range lines {
+		if isMarkdownFenceLine(line) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "  • "):
+			lines[i] = strings.TrimPrefix(line, "  ")
+		case strings.HasPrefix(line, "    ‣ "):
+			lines[i] = strings.TrimPrefix(line, "  ")
+		case strings.HasPrefix(line, "      ◦ "):
+			lines[i] = strings.TrimPrefix(line, "  ")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func isMarkdownFenceLine(line string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return false
+	}
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
 }
 
 // SendChatAction sends a chat action (e.g., "typing").

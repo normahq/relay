@@ -356,6 +356,61 @@ func TestSendAgentReply_MarkdownV2PreservesMarkdownStructure(t *testing.T) {
 	}
 }
 
+func TestSendAgentReply_MarkdownV2CleansConverterArtifacts(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+	m.SetAgentReplyFormattingMode(telegramfmt.ModeMarkdownV2)
+
+	input := "I can help you run the full Relay workflow in this session:\n\n" +
+		"- Explain/debug Relay behavior, config, commands, and session issues\n" +
+		"- Make code changes in `/home/bigboss/Projects/relay`\n" +
+		"- Run checks and quality gates:\n" +
+		"```bash\n" +
+		"go test -race ./...\n" +
+		"go tool golangci-lint run\n" +
+		"```\n" +
+		"- Prepare and land workspace changes using Relay flow:\n" +
+		"  1. `relay.workspace.import`\n" +
+		"  2. implement + verify\n" +
+		"  3. `relay.workspace.export` with a Conventional Commit message\n" +
+		"- Help with bot command contracts (`/start`, `/topic`, `/close`, `/cancel`, `/user ...`)\n" +
+		"- Update docs when behavior changes (`README.md`, `docs/relay.md`)"
+	if err := m.SendAgentReply(context.Background(), 9001, input, 77); err != nil {
+		t.Fatalf("SendAgentReply() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("messages calls = %d, want 1", len(tgClient.messages))
+	}
+	got := tgClient.messages[0].Text
+	for _, unwanted := range []string{
+		"\n  • ",
+		"\n    ‣ ",
+		"\n      ◦ ",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("message text = %q, contains converter indentation artifact %q", got, unwanted)
+		}
+	}
+	for _, want := range []string{
+		"I can help you run the full Relay workflow in this session:",
+		"\n• Explain/debug Relay behavior, config, commands, and session issues",
+		"\n• Make code changes in `/home/bigboss/Projects/relay`",
+		"```bash\ngo test -race ./...\ngo tool golangci-lint run\n```",
+		"\n  ‣ `relay\\.workspace\\.import`",
+		"\n• Help with bot command contracts",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("message text = %q, want to contain %q", got, want)
+		}
+	}
+	if strings.HasPrefix(got, "\n") || strings.HasSuffix(got, "\n") {
+		t.Fatalf("message text = %q, want no leading or trailing newline", got)
+	}
+}
+
 func TestSendAgentReply_MarkdownV2PreservesExistingHardLineBreaks(t *testing.T) {
 	t.Parallel()
 
