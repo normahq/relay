@@ -604,18 +604,7 @@ func (h *RelayHandler) runTurn(
 		eventText := eventTextBuilder.String()
 		if strings.TrimSpace(eventText) != "" {
 			if ev.Partial {
-				switch {
-				case !hasPartialCandidate:
-					lastPartialText = eventText
-				case strings.HasPrefix(eventText, lastPartialText):
-					// Handle cumulative partial streams by replacing the prior snapshot.
-					lastPartialText = eventText
-				case strings.HasPrefix(lastPartialText, eventText):
-					// Ignore shorter duplicate snapshots.
-				default:
-					// Handle delta partial streams by appending incoming text.
-					lastPartialText += eventText
-				}
+				lastPartialText = mergeADKTextChunk(lastPartialText, eventText, hasPartialCandidate)
 				hasPartialCandidate = strings.TrimSpace(lastPartialText) != ""
 			}
 			if !ev.Partial {
@@ -623,7 +612,7 @@ func (h *RelayHandler) runTurn(
 				hasFallbackCandidate = true
 			}
 			if ev.IsFinalResponse() {
-				lastFinalResponseText = eventText
+				lastFinalResponseText = mergeADKTextChunk(lastFinalResponseText, eventText, hasFinalCandidate)
 				hasFinalCandidate = true
 			}
 		}
@@ -660,6 +649,8 @@ func (h *RelayHandler) runTurn(
 			Bool("final_candidate_present", hasFinalCandidate).
 			Bool("fallback_candidate_present", hasFallbackCandidate).
 			Bool("partial_candidate_present", hasPartialCandidate).
+			Int("final_candidate_char_count", len(lastFinalResponseText)).
+			Int("fallback_candidate_char_count", len(lastNonPartialText)).
 			Int("partial_candidate_char_count", len(lastPartialText)).
 			Msg("received ACP event")
 		if ev.TurnComplete {
@@ -701,6 +692,23 @@ func (h *RelayHandler) runTurn(
 	}
 
 	return nil
+}
+
+func mergeADKTextChunk(current, incoming string, hasCurrent bool) string {
+	if !hasCurrent {
+		return incoming
+	}
+	switch {
+	case strings.HasPrefix(incoming, current):
+		// Cumulative stream snapshot.
+		return incoming
+	case strings.HasPrefix(current, incoming):
+		// Shorter duplicate snapshot.
+		return current
+	default:
+		// Delta stream chunk.
+		return current + incoming
+	}
 }
 
 func (h *RelayHandler) getOwnerID() int64 {

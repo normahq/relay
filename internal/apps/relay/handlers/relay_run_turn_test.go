@@ -387,6 +387,95 @@ func TestRunTurn_SendsOnlyFinalTextOnTurnComplete(t *testing.T) {
 	}
 }
 
+func TestRunTurn_MergesFinalResponseDeltaChunksOnTurnComplete(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	msg.SetAgentReplyFormattingMode("none")
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	h := &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		chunkOne := adksession.NewEvent(invocationID)
+		chunkOne.Content = genai.NewContentFromText("Пункт списка1\n", genai.RoleModel)
+
+		chunkTwo := adksession.NewEvent(invocationID)
+		chunkTwo.Content = genai.NewContentFromText("- Пункт списка2\n", genai.RoleModel)
+
+		chunkThree := adksession.NewEvent(invocationID)
+		chunkThree.Content = genai.NewContentFromText("- Пункт списка3", genai.RoleModel)
+
+		done := adksession.NewEvent(invocationID)
+		done.TurnComplete = true
+
+		return []*adksession.Event{chunkOne, chunkTwo, chunkThree, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	want := "Пункт списка1\n- Пункт списка2\n- Пункт списка3"
+	if got := tgClient.messages[0].Text; got != want {
+		t.Fatalf("message text = %q, want %q", got, want)
+	}
+}
+
+func TestRunTurn_MergesFinalResponseCumulativeChunksOnTurnComplete(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	msg.SetAgentReplyFormattingMode("none")
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	h := &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		chunkOne := adksession.NewEvent(invocationID)
+		chunkOne.Content = genai.NewContentFromText("Doing", genai.RoleModel)
+
+		chunkTwo := adksession.NewEvent(invocationID)
+		chunkTwo.Content = genai.NewContentFromText("Doing well", genai.RoleModel)
+
+		chunkThree := adksession.NewEvent(invocationID)
+		chunkThree.Content = genai.NewContentFromText("Doing well.", genai.RoleModel)
+
+		done := adksession.NewEvent(invocationID)
+		done.TurnComplete = true
+
+		return []*adksession.Event{chunkOne, chunkTwo, chunkThree, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != "Doing well." {
+		t.Fatalf("message text = %q, want Doing well.", got)
+	}
+}
+
 func TestRunTurn_UsesLastNonPartialFallbackOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
