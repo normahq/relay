@@ -16,6 +16,7 @@ import (
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	"github.com/normahq/relay/internal/apps/relay/handlers"
+	"github.com/normahq/relay/internal/apps/relay/paths"
 	"github.com/normahq/relay/internal/apps/relay/shutdown"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
 	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
@@ -76,11 +77,11 @@ func Module(
 	}
 
 	logger := log.Logger.With().Str("component", "relay").Logger()
-	workingDir, err := resolveWorkingDir(cfg.Relay.WorkingDir)
+	workingDir, err := paths.ResolveWorkingDir(cfg.Relay.WorkingDir)
 	if err != nil {
 		return fx.Module("relay", fx.Error(fmt.Errorf("resolve relay working_dir: %w", err)))
 	}
-	configPath := relayConfigPath(workingDir)
+	configPath := paths.ConfigPath(workingDir)
 	if err := validateRelayMCPConfiguration(cfg, normaCfg, configPath); err != nil {
 		return fx.Module("relay", fx.Error(err))
 	}
@@ -88,7 +89,7 @@ func Module(
 	if err != nil {
 		return fx.Module("relay", fx.Error(err))
 	}
-	stateDir, err := resolveStateDir(workingDir, cfg.Relay.StateDir)
+	stateDir, err := paths.ResolveStateDir(workingDir, cfg.Relay.StateDir)
 	if err != nil {
 		return fx.Module("relay", fx.Error(err))
 	}
@@ -337,53 +338,8 @@ func validateRelayMCPConfiguration(cfg Config, normaCfg runtimeconfig.RuntimeCon
 	return fmt.Errorf("invalid relay MCP configuration: %s", strings.Join(errs, "; "))
 }
 
-func relayConfigPath(workingDir string) string {
-	trimmed := strings.TrimSpace(workingDir)
-	if trimmed == "" {
-		return ".config/relay/config.yaml"
-	}
-	return filepath.Join(trimmed, ".config", "relay", "config.yaml")
-}
-
-func resolveWorkingDir(raw string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get current working directory: %w", err)
-	}
-
-	workingDir := strings.TrimSpace(raw)
-	if workingDir == "" {
-		return filepath.Clean(cwd), nil
-	}
-	if !filepath.IsAbs(workingDir) {
-		workingDir = filepath.Join(cwd, workingDir)
-	}
-
-	resolved, err := filepath.Abs(workingDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve absolute working_dir %q: %w", raw, err)
-	}
-	return filepath.Clean(resolved), nil
-}
-
 func isExpectedBotRunShutdown(err error) bool {
 	return shutdown.IsExpected(err)
-}
-
-func resolveStateDir(workingDir, raw string) (string, error) {
-	stateDir := strings.TrimSpace(raw)
-	if stateDir == "" {
-		return "", fmt.Errorf("relay.state_dir is required")
-	}
-	if !filepath.IsAbs(stateDir) {
-		stateDir = filepath.Join(workingDir, stateDir)
-	}
-
-	resolved, err := filepath.Abs(stateDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve absolute state_dir %q: %w", raw, err)
-	}
-	return filepath.Clean(resolved), nil
 }
 
 func warnLegacyWorkspaceDir(logger zerolog.Logger, workingDir, stateDir string, workspaceEnabled bool) {

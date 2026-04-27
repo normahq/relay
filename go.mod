@@ -9,7 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/metalagman/appkit v0.1.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
-	github.com/normahq/norma v0.0.0-20260424171718-bf1dc8ba8bf1
+	github.com/normahq/norma v0.0.0-20260427115849-0a0f3e90f2b1
 	github.com/pressly/goose/v3 v3.16.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2

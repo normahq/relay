@@ -16,6 +16,7 @@ import (
 	"github.com/normahq/norma/pkg/runtime/agentfactory"
 	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/norma/pkg/runtime/sessionstate"
+	"github.com/normahq/relay/internal/apps/relay/paths"
 	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/normahq/relay/internal/git"
 	"go.uber.org/fx"
@@ -99,7 +100,7 @@ func (b *Builder) buildRelayInstruction(
 	data := relayPromptData{
 		SessionID:         sessionID,
 		ChannelType:       strings.TrimSpace(channelType),
-		ConfigPath:        relayConfigPath(b.workingDir),
+		ConfigPath:        paths.ConfigPath(b.workingDir),
 		WorkspaceDir:      workspaceDir,
 		WorkspaceEnabled:  b.workspaceEnabled,
 		SessionBranch:     sessionBranch,
@@ -126,14 +127,6 @@ func (b *Builder) buildRelayInstruction(
 		return relayInstructionTmpl
 	}
 	return buf.String()
-}
-
-func relayConfigPath(workingDir string) string {
-	trimmed := strings.TrimSpace(workingDir)
-	if trimmed == "" {
-		return ""
-	}
-	return filepath.Join(trimmed, ".config", "relay", "config.yaml")
 }
 
 type BuilderParams struct {

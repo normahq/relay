@@ -166,6 +166,8 @@ profiles:
 
 Define reusable MCP servers in `runtime.mcp_servers`, then attach them either to one provider with `runtime.providers.<provider_id>.mcp_servers` or to every relay session with `relay.mcp_servers`.
 
+The selected config file is env-expanded before YAML parsing, so both `$VAR` and `${VAR}` work anywhere in the file. For `stdio` MCP servers, the child process inherits Relay's full process environment by default, and `runtime.mcp_servers.<id>.env` overrides individual variables.
+
 ```yaml
 runtime:
   mcp_servers:

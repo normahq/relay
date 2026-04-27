@@ -30,6 +30,7 @@ profiles:
   default:
     relay:
       provider: relay_agent
+      global_instruction: from profile
 `); err != nil {
 		t.Fatalf("write relay config: %v", err)
 	}
@@ -55,6 +56,9 @@ profiles:
 
 	if relayCfg.Relay.Provider != "relay_agent" {
 		t.Fatalf("provider = %q, want relay_agent", relayCfg.Relay.Provider)
+	}
+	if relayCfg.Relay.GlobalInstruction != "from profile" {
+		t.Fatalf("global_instruction = %q, want from profile", relayCfg.Relay.GlobalInstruction)
 	}
 	if !relayCfg.Relay.Telegram.Webhook.Enabled {
 		t.Fatal("webhook.enabled = false, want true from env override")

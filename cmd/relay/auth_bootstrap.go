@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/normahq/relay/internal/apps/relay/auth"
+	"github.com/normahq/relay/internal/apps/relay/paths"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
 )
 
@@ -18,19 +18,7 @@ const (
 var relayGenerateOwnerToken = auth.GenerateOwnerToken
 
 func resolveRelayStateDir(workingDir, rawStateDir string) (string, error) {
-	stateDir := strings.TrimSpace(rawStateDir)
-	if stateDir == "" {
-		return "", fmt.Errorf("relay.state_dir is required")
-	}
-	if !filepath.IsAbs(stateDir) {
-		stateDir = filepath.Join(workingDir, stateDir)
-	}
-
-	resolved, err := filepath.Abs(stateDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve relay state_dir %q: %w", rawStateDir, err)
-	}
-	return filepath.Clean(resolved), nil
+	return paths.ResolveStateDir(workingDir, rawStateDir)
 }
 
 func loadOrCreateRelayOwnerToken(ctx context.Context, dbPath string) (string, error) {

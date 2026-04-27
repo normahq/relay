@@ -25,7 +25,6 @@ flowchart TB
     handlers["github.com/normahq/relay/internal/apps/relay/handlers"]
     messenger["github.com/normahq/relay/internal/apps/relay/messenger"]
     middleware["github.com/normahq/relay/internal/apps/relay/middleware"]
-    runtimecfg["github.com/normahq/relay/internal/apps/relay/runtimecfg"]
     session["github.com/normahq/relay/internal/apps/relay/session"]
     state["github.com/normahq/relay/internal/apps/relay/state"]
     tgbotkit["github.com/normahq/relay/internal/apps/relay/tgbotkit"]
@@ -34,7 +33,6 @@ flowchart TB
     relay_root --> agent
     relay_root --> auth
     relay_root --> handlers
-    relay_root --> runtimecfg
     relay_root --> state
     relay_root --> tgbotkit
 
@@ -44,14 +42,12 @@ flowchart TB
     handlers --> auth
     handlers --> telegram
     handlers --> messenger
-    handlers --> runtimecfg
     handlers --> session
     handlers --> welcome
 
     middleware --> auth
 
     session --> agent
-    session --> runtimecfg
     session --> state
 ```
 
@@ -59,15 +55,14 @@ flowchart TB
 
 | Package | Import Path | Description | Depends On |
 |---------|-------------|-------------|------------|
-| `relay` | `internal/apps/relay` | Root application module | agent, auth, handlers, runtimecfg, state, tgbotkit |
+| `relay` | `internal/apps/relay` | Root application module | agent, auth, handlers, state, tgbotkit |
 | `agent` | `internal/apps/relay/agent` | Agent builder & workspace manager | `internal/git`, `pkg/runtime/*` |
 | `auth` | `internal/apps/relay/auth` | Owner authentication store | state (interface) |
 | `channel/telegram` | `internal/apps/relay/channel/telegram` | Telegram message adapter | messenger, session |
-| `handlers` | `internal/apps/relay/handlers` | Telegram command handlers | auth, channel/telegram, messenger, runtimecfg, session, welcome |
+| `handlers` | `internal/apps/relay/handlers` | Telegram command handlers | auth, channel/telegram, messenger, session, welcome |
 | `messenger` | `internal/apps/relay/messenger` | Telegram message sending | `tgbotkit/client` |
 | `middleware` | `internal/apps/relay/middleware` | Auth middleware | auth |
-| `runtimecfg` | `internal/apps/relay/runtimecfg` | Runtime config loader | `pkg/runtime/appconfig` |
-| `session` | `internal/apps/relay/session` | Session management | agent, runtimecfg, state |
+| `session` | `internal/apps/relay/session` | Session management | agent, state |
 | `state` | `internal/apps/relay/state` | SQLite state persistence | `modernc.org/sqlite`, `updatepoller` |
 | `tgbotkit` | `internal/apps/relay/tgbotkit` | Telegram bot runtime | `tgbotkit/*` |
 | `welcome` | `internal/apps/relay/welcome` | Welcome message builder | (standalone) |
@@ -93,6 +88,7 @@ Relay config is loaded from one selected file (priority order):
 4. Environment variables (`RELAY_*`) via Viper env mapping
 
 Relay also auto-loads a `.env` file at startup (via `godotenv`) from the relay process working directory only. Values loaded from `.env` are treated as environment variables, so `RELAY_*` entries override file config the same way as exported shell variables.
+The selected config file is env-expanded before YAML parsing, so both `$VAR` and `${VAR}` placeholders work anywhere in that file. For `runtime.mcp_servers.<id>` entries with `type: stdio`, the launched MCP process inherits Relay's full process environment by default, and `env` overrides individual variables.
 
 Example `.env`:
 
