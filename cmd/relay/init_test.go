@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/appconfig"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
+	"github.com/normahq/runtime/appconfig"
 	"gopkg.in/yaml.v3"
 )
 

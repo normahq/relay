@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/relay/internal/apps/relay"
 	"github.com/normahq/relay/internal/apps/relay/shutdown"
+	"github.com/normahq/runtime/appconfig"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

@@ -10,14 +10,14 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/normahq/norma/pkg/runtime/agentconfig"
-	"github.com/normahq/norma/pkg/runtime/mcpregistry"
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	relaytelegram "github.com/normahq/relay/internal/apps/relay/channel/telegram"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
 	"github.com/normahq/relay/internal/apps/relay/session"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
 	"github.com/normahq/relay/internal/apps/workspacemcp"
+	"github.com/normahq/runtime/agentconfig"
+	"github.com/normahq/runtime/mcpregistry"
 	"github.com/rs/zerolog"
 	"go.uber.org/fx"
 )

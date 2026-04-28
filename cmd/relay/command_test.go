@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/appconfig"
 	relayapp "github.com/normahq/relay/internal/apps/relay"
+	"github.com/normahq/runtime/appconfig"
 )
 
 type relayTestConfigDocument struct {

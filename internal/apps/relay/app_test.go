@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/agentconfig"
-	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
 	"github.com/normahq/relay/internal/apps/relay/paths"
 	"github.com/normahq/relay/internal/git"
+	"github.com/normahq/runtime/agentconfig"
+	runtimeconfig "github.com/normahq/runtime/appconfig"
 )
 
 const (

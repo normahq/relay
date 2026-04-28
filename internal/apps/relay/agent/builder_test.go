@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/agentconfig"
-	"github.com/normahq/norma/pkg/runtime/agentfactory"
-	runtimeconfig "github.com/normahq/norma/pkg/runtime/appconfig"
-	"github.com/normahq/norma/pkg/runtime/mcpregistry"
-	"github.com/normahq/norma/pkg/runtime/sessionstate"
+	"github.com/normahq/runtime/agentconfig"
+	"github.com/normahq/runtime/agentfactory"
+	runtimeconfig "github.com/normahq/runtime/appconfig"
+	"github.com/normahq/runtime/mcpregistry"
+	"github.com/normahq/runtime/sessionstate"
 	adksession "google.golang.org/adk/session"
 )
 

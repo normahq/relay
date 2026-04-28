@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/normahq/norma/pkg/runtime/mcpregistry"
 	"github.com/normahq/relay/internal/apps/relay/session"
 	"github.com/normahq/relay/internal/apps/sessionmcp"
+	"github.com/normahq/runtime/mcpregistry"
 	"github.com/rs/zerolog"
 )
 
