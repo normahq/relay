@@ -165,7 +165,7 @@ func (h *RelayHandler) initializeBotUsername(ctx context.Context) error {
 	h.mu.Unlock()
 
 	if h.authToken != "" {
-		deeplink := fmt.Sprintf("https://t.me/%s?start=%s", username, h.authToken)
+		deeplink := fmt.Sprintf("https://t.me/%s?start=owner=%s", username, h.authToken)
 		h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Str("start_deeplink", deeplink).Msg("relay start deeplink ready")
 		return nil
 	}

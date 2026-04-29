@@ -40,6 +40,16 @@ type StartHandlerParams struct {
 	AuthToken         string `name:"relay_auth_token"`
 }
 
+const (
+	startModeOwner  = "owner"
+	startModeInvite = "invite"
+)
+
+type startCommandArgs struct {
+	mode  string
+	token string
+}
+
 // NewStartHandler creates a new start handler.
 func NewStartHandler(params StartHandlerParams) *StartHandler {
 	return &StartHandler{
@@ -79,71 +89,12 @@ func (h *StartHandler) onCommand(ctx context.Context, event *events.CommandEvent
 		Int64("chat_id", chatID).
 		Msg("Start command received")
 
-	// Check if this is an invite token (not the owner token)
-	token := strings.TrimSpace(event.Args)
-	if token != "" && token != h.authToken && !strings.HasPrefix(token, "?") && !strings.Contains(token, "=") {
-		// Reject if user is already owner or collaborator
-		if h.ownerStore.IsOwner(userID) {
-			if err := h.messenger.SendPlain(ctx, chatID, "You are already the bot owner.", 0); err != nil {
-				return err
-			}
-			return nil
-		}
-		if _, ok, err := h.collaboratorStore.GetCollaborator(ctx, userIDStr); err != nil {
-			log.Warn().Err(err).Str("user_id", userIDStr).Msg("failed to check collaborator")
-		} else if ok {
-			if err := h.messenger.SendPlain(ctx, chatID, "You are already a collaborator.", 0); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Try to consume invite
-		invite, err := h.inviteStore.GetInvite(ctx, token)
-		if err != nil {
-			log.Warn().Err(err).Str("token", token).Msg("failed to get invite")
-			if err := h.messenger.SendPlain(ctx, chatID, "Failed to process invite. Please try again.", 0); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		if invite == nil {
-			if err := h.messenger.SendPlain(ctx, chatID, "This invite link is invalid or has expired.", 0); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		// Invite is valid - add user as collaborator
-		info := extractUserInfo(event.Message.From)
-		collaborator := auth.Collaborator{
-			UserID:    userIDStr,
-			Username:  info.username,
-			FirstName: info.firstName,
-			AddedBy:   invite.CreatedBy,
-			AddedAt:   time.Now(),
-		}
-		if err := h.collaboratorStore.AddCollaborator(ctx, collaborator); err != nil {
-			log.Error().Err(err).Msg("failed to add collaborator from invite")
-			if err := h.messenger.SendPlain(ctx, chatID, "Failed to complete registration. Please try again.", 0); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		log.Info().Str("user_id", userIDStr).Str("invited_by", invite.CreatedBy).Msg("User registered as collaborator via invite")
-
-		if err := h.messenger.SendPlain(ctx, chatID, "Welcome! You are now a bot collaborator.", 0); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Continue with normal owner authentication flow
-	authToken, malformed := parseStartAuthArg(event.Args)
+	args, malformed := parseStartCommandArgs(event.Args)
 
 	if h.ownerStore.HasOwner() {
+		if args.mode == startModeInvite {
+			return h.handleInviteStart(ctx, chatID, userID, userIDStr, args.token, event.Message.From)
+		}
 		if h.ownerStore.IsOwner(userID) {
 			// Persist chatID for existing owner
 			if err := h.ownerStore.UpdateChatID(chatID); err != nil {
@@ -175,14 +126,18 @@ func (h *StartHandler) onCommand(ctx context.Context, event *events.CommandEvent
 		return nil
 	}
 
-	if authToken == "" {
+	if args.mode == "" {
 		if err := h.sendWelcomeMessage(ctx, chatID); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	if authToken != h.authToken {
+	if args.mode == startModeInvite {
+		return h.handleInviteStart(ctx, chatID, userID, userIDStr, args.token, event.Message.From)
+	}
+
+	if args.token != h.authToken {
 		log.Warn().
 			Int64("user_id", userID).
 			Int64("chat_id", chatID).
@@ -228,19 +183,42 @@ func (h *StartHandler) onCommand(ctx context.Context, event *events.CommandEvent
 	return nil
 }
 
-func parseStartAuthArg(raw string) (string, bool) {
-	authToken := strings.TrimSpace(raw)
-	if authToken == "" {
-		return "", false
+func parseStartCommandArgs(raw string) (startCommandArgs, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return startCommandArgs{}, false
 	}
-	if strings.HasPrefix(authToken, "?") || strings.Contains(authToken, "=") {
-		return "", true
+
+	fields := strings.Fields(trimmed)
+	if len(fields) != 1 {
+		return startCommandArgs{}, true
 	}
-	return authToken, false
+
+	assignment := fields[0]
+	if strings.HasPrefix(assignment, "?") || strings.Count(assignment, "=") != 1 {
+		return startCommandArgs{}, true
+	}
+
+	key, value, ok := strings.Cut(assignment, "=")
+	if !ok {
+		return startCommandArgs{}, true
+	}
+	key = strings.TrimSpace(key)
+	value = strings.TrimSpace(value)
+	if key == "" || value == "" {
+		return startCommandArgs{}, true
+	}
+
+	switch key {
+	case startModeOwner, startModeInvite:
+		return startCommandArgs{mode: key, token: value}, false
+	default:
+		return startCommandArgs{}, true
+	}
 }
 
 func malformedStartFormatMessage() string {
-	return "Invalid /start format. Use /start <your_owner_token>.\n\nIf using a link, use https://t.me/<bot_username>?start=<your_owner_token>"
+	return "Invalid /start format. Use one of:\n• /start owner=<your_owner_token>\n• /start invite=<your_invite_token>\n\nIf using a link, use https://t.me/<bot_username>?start=owner=<your_owner_token>"
 }
 
 type userInfo struct {
@@ -263,7 +241,7 @@ func extractUserInfo(from *client.User) userInfo {
 }
 
 func (h *StartHandler) sendWelcomeMessage(ctx context.Context, chatID int64) error {
-	return h.messenger.SendPlain(ctx, chatID, "Welcome to Norma Relay Bot!\n\nTo authenticate, send /start <your_owner_token>", 0)
+	return h.messenger.SendPlain(ctx, chatID, "Welcome to Norma Relay Bot!\n\nTo authenticate, send /start owner=<your_owner_token>", 0)
 }
 
 func (h *StartHandler) sendOwnerRegisteredMessage(ctx context.Context, chatID int64, firstName string, startErr error) error {
@@ -312,4 +290,67 @@ func relayStartFailureMessage(err error) string {
 		"Failed to start relay provider session: %v.\nPlease verify relay provider configuration, then send /start again or restart relay.",
 		err,
 	)
+}
+
+func (h *StartHandler) handleInviteStart(ctx context.Context, chatID, userID int64, userIDStr, token string, from *client.User) error {
+	if h.ownerStore.IsOwner(userID) {
+		if err := h.messenger.SendPlain(ctx, chatID, "You are already the bot owner.", 0); err != nil {
+			return err
+		}
+		return nil
+	}
+	if h.collaboratorStore != nil {
+		if _, ok, err := h.collaboratorStore.GetCollaborator(ctx, userIDStr); err != nil {
+			log.Warn().Err(err).Str("user_id", userIDStr).Msg("failed to check collaborator")
+		} else if ok {
+			if err := h.messenger.SendPlain(ctx, chatID, "You are already a collaborator.", 0); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+	if h.inviteStore == nil || h.collaboratorStore == nil {
+		log.Error().Msg("invite or collaborator store is nil during /start invite flow")
+		if err := h.messenger.SendPlain(ctx, chatID, "Failed to process invite. Please try again.", 0); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	invite, err := h.inviteStore.GetInvite(ctx, token)
+	if err != nil {
+		log.Warn().Err(err).Str("token", token).Msg("failed to get invite")
+		if err := h.messenger.SendPlain(ctx, chatID, "Failed to process invite. Please try again.", 0); err != nil {
+			return err
+		}
+		return nil
+	}
+	if invite == nil {
+		if err := h.messenger.SendPlain(ctx, chatID, "This invite link is invalid or has expired.", 0); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	info := extractUserInfo(from)
+	collaborator := auth.Collaborator{
+		UserID:    userIDStr,
+		Username:  info.username,
+		FirstName: info.firstName,
+		AddedBy:   invite.CreatedBy,
+		AddedAt:   time.Now(),
+	}
+	if err := h.collaboratorStore.AddCollaborator(ctx, collaborator); err != nil {
+		log.Error().Err(err).Msg("failed to add collaborator from invite")
+		if err := h.messenger.SendPlain(ctx, chatID, "Failed to complete registration. Please try again.", 0); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	log.Info().Str("user_id", userIDStr).Str("invited_by", invite.CreatedBy).Msg("user registered as collaborator via invite")
+	if err := h.messenger.SendPlain(ctx, chatID, "Welcome! You are now a bot collaborator.", 0); err != nil {
+		return err
+	}
+	return nil
 }

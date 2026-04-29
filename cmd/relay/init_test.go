@@ -136,10 +136,10 @@ func TestInitCommand_NonInteractiveAutoSelectsRootAndGeneratesDetectedAgents(t *
 	if !strings.Contains(out, "start command: relay start") {
 		t.Fatalf("init output missing start command: %q", out)
 	}
-	if !strings.Contains(out, "auth command: /start owner-token-init") {
+	if !strings.Contains(out, "auth command: /start owner=owner-token-init") {
 		t.Fatalf("init output missing auth command: %q", out)
 	}
-	if !strings.Contains(out, "auth url: https://t.me/NormaBot?start=owner-token-init") {
+	if !strings.Contains(out, "auth url: https://t.me/NormaBot?start=owner=owner-token-init") {
 		t.Fatalf("init output missing auth url: %q", out)
 	}
 	if !strings.Contains(out, "telegram token stored in: "+filepath.Join(workingDir, ".env")) {

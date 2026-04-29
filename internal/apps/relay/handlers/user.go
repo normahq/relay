@@ -112,7 +112,7 @@ func (h *userHandler) onAdd(ctx context.Context, commandCtx relaytelegram.Comman
 		return nil
 	}
 
-	inviteLink := fmt.Sprintf("https://t.me/%s?start=%s", h.getBotUsername(ctx), token)
+	inviteLink := buildInviteLink(h.getBotUsername(ctx), token)
 	message := fmt.Sprintf("Invite link created:\n%s\n\nVisit this link to become a bot collaborator", inviteLink)
 
 	if err := h.channel.SendPlain(ctx, commandCtx.Locator, message); err != nil {
@@ -203,4 +203,12 @@ func displayName(username, firstName string) string {
 		return firstName
 	}
 	return "unknown"
+}
+
+func buildInviteLink(botUsername, inviteToken string) string {
+	username := strings.TrimSpace(botUsername)
+	if username == "" {
+		username = "<bot_username>"
+	}
+	return fmt.Sprintf("https://t.me/%s?start=invite=%s", username, inviteToken)
 }

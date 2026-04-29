@@ -138,7 +138,7 @@ func initCommand() *cobra.Command {
 			_, _ = fmt.Fprintf(relayInitOutput, "relay provider: %s\n", selectedRelayProvider)
 			_, _ = fmt.Fprintf(relayInitOutput, "telegram token stored in: %s\n", storageTarget)
 			_, _ = fmt.Fprintf(relayInitOutput, "start command: relay start\n")
-			_, _ = fmt.Fprintf(relayInitOutput, "auth command: /start %s\n", ownerToken)
+			_, _ = fmt.Fprintf(relayInitOutput, "auth command: /start owner=%s\n", ownerToken)
 			_, _ = fmt.Fprintf(relayInitOutput, "auth url: %s\n", buildAuthURL(bot.username, ownerToken))
 
 			return nil

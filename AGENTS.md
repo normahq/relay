@@ -33,7 +33,8 @@ go tool golangci-lint run
 
 ## Bot Commands (Current Contract)
 
-- `/start <owner_token>`: direct message only; owner authentication/bootstrap entrypoint, also used for invite-token collaborator onboarding.
+- `/start owner=<owner_token>`: direct message only; owner authentication/bootstrap entrypoint.
+- `/start invite=<invite_token>`: direct message only; collaborator invite onboarding entrypoint.
 - `/topic <name>`: owner/collaborator, direct message only; creates a topic session labeled `<name>` using the configured relay provider.
 - `/close`: owner/collaborator, direct message only; closes a topic session or stops the owner session.
 - `/cancel`: owner/collaborator; cancels in-flight turn processing for the current session and drops queued turns.

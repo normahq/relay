@@ -35,7 +35,7 @@ relay start
 
 3. Authenticate in Telegram:
 - open the auth URL printed by `relay init`/`relay start`, or
-- send `/start <owner_token>` in a direct message to your bot
+- send `/start owner=<owner_token>` in a direct message to your bot
 
 4. Start a topic session:
 
@@ -45,7 +45,8 @@ relay start
 
 ## Bot Commands
 
-- `/start <owner_token>`: direct-message auth/bootstrap (also accepts collaborator invite token).
+- `/start owner=<owner_token>`: direct-message owner auth/bootstrap.
+- `/start invite=<invite_token>`: direct-message collaborator onboarding via invite link.
 - `/topic <name>`: owner/collaborator, direct message only; starts a topic session with a required free-form name.
 - `/close`: owner/collaborator, direct message only; closes current topic session or stops the owner session.
 - `/cancel`: owner/collaborator; cancels in-flight turn and drops queued turns for current session.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/normahq/relay/internal/apps/relay/auth"
 	"github.com/normahq/relay/internal/apps/relay/messenger"
@@ -34,6 +35,71 @@ func (s *fakeOwnerKVStore) SetJSON(_ context.Context, _ string, value any) error
 	s.value = value
 	s.ok = true
 	return nil
+}
+
+type fakeInviteKVStore struct {
+	values map[string]any
+}
+
+func (s *fakeInviteKVStore) GetJSON(_ context.Context, key string) (any, bool, error) {
+	value, ok := s.values[key]
+	return value, ok, nil
+}
+
+func (s *fakeInviteKVStore) SetWithTTL(_ context.Context, key string, value any, _ time.Duration) error {
+	if s.values == nil {
+		s.values = make(map[string]any)
+	}
+	s.values[key] = value
+	return nil
+}
+
+func (s *fakeInviteKVStore) Delete(_ context.Context, key string) error {
+	delete(s.values, key)
+	return nil
+}
+
+func (s *fakeInviteKVStore) List(_ context.Context, prefix string) ([]string, error) {
+	keys := make([]string, 0, len(s.values))
+	for key := range s.values {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+type fakeCollaboratorBackingStore struct {
+	values map[string]auth.Collaborator
+}
+
+func (s *fakeCollaboratorBackingStore) AddCollaborator(_ context.Context, c auth.Collaborator) error {
+	if s.values == nil {
+		s.values = make(map[string]auth.Collaborator)
+	}
+	s.values[c.UserID] = c
+	return nil
+}
+
+func (s *fakeCollaboratorBackingStore) RemoveCollaborator(_ context.Context, userID string) error {
+	delete(s.values, userID)
+	return nil
+}
+
+func (s *fakeCollaboratorBackingStore) GetCollaborator(_ context.Context, userID string) (*auth.Collaborator, bool, error) {
+	collaborator, ok := s.values[userID]
+	if !ok {
+		return nil, false, nil
+	}
+	return &collaborator, true, nil
+}
+
+func (s *fakeCollaboratorBackingStore) ListCollaborators(_ context.Context) ([]auth.Collaborator, error) {
+	collaborators := make([]auth.Collaborator, 0, len(s.values))
+	for _, collaborator := range s.values {
+		collaborators = append(collaborators, collaborator)
+	}
+	return collaborators, nil
 }
 
 type fakeTelegramClient struct {
@@ -116,22 +182,37 @@ func (f *fakeRelayOwnerActivator) ActivateOwner(_ context.Context, ownerID, chat
 	return f.err
 }
 
-func TestParseStartAuthArg(t *testing.T) {
+func TestParseStartCommandArgs(t *testing.T) {
 	tests := []struct {
 		name          string
 		raw           string
-		wantToken     string
+		wantArgs      startCommandArgs
 		wantMalformed bool
 	}{
 		{
-			name:      "empty args",
-			raw:       "   ",
-			wantToken: "",
+			name: "empty args",
+			raw:  "   ",
 		},
 		{
-			name:      "plain token",
-			raw:       "abc123",
-			wantToken: "abc123",
+			name: "owner token",
+			raw:  "owner=abc123",
+			wantArgs: startCommandArgs{
+				mode:  startModeOwner,
+				token: "abc123",
+			},
+		},
+		{
+			name: "invite token",
+			raw:  "invite=abc123",
+			wantArgs: startCommandArgs{
+				mode:  startModeInvite,
+				token: "abc123",
+			},
+		},
+		{
+			name:          "bare token rejected",
+			raw:           "abc123",
+			wantMalformed: true,
 		},
 		{
 			name:          "query-like token with question mark",
@@ -139,22 +220,32 @@ func TestParseStartAuthArg(t *testing.T) {
 			wantMalformed: true,
 		},
 		{
-			name:          "query-like start assignment",
+			name:          "legacy start assignment rejected",
 			raw:           "start=abc123",
 			wantMalformed: true,
 		},
 		{
-			name:          "token with equals rejected in strict mode",
-			raw:           "abc=123",
+			name:          "unknown mode rejected",
+			raw:           "foo=abc123",
+			wantMalformed: true,
+		},
+		{
+			name:          "multiple assignments rejected",
+			raw:           "owner=abc123 source=tg",
+			wantMalformed: true,
+		},
+		{
+			name:          "missing value rejected",
+			raw:           "owner=",
 			wantMalformed: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotToken, gotMalformed := parseStartAuthArg(tc.raw)
-			if gotToken != tc.wantToken {
-				t.Fatalf("token = %q, want %q", gotToken, tc.wantToken)
+			gotArgs, gotMalformed := parseStartCommandArgs(tc.raw)
+			if gotArgs != tc.wantArgs {
+				t.Fatalf("args = %+v, want %+v", gotArgs, tc.wantArgs)
 			}
 			if gotMalformed != tc.wantMalformed {
 				t.Fatalf("malformed = %t, want %t", gotMalformed, tc.wantMalformed)
@@ -169,7 +260,7 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 		relay := &fakeRelayOwnerActivator{}
 		handler.SetRelayHandler(relay)
 
-		err := handler.onCommand(context.Background(), newStartEvent("secret-token", 101, 9001))
+		err := handler.onCommand(context.Background(), newStartEvent("owner=secret-token", 101, 9001))
 		if err != nil {
 			t.Fatalf("onCommand(): %v", err)
 		}
@@ -205,7 +296,22 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 			t.Fatal("owner registered unexpectedly")
 		}
 		assertLastSentContains(t, tgClient, "Invalid /start format")
-		assertLastSentContains(t, tgClient, "https://t.me/<bot_username>?start=<your_owner_token>")
+		assertLastSentContains(t, tgClient, "https://t.me/<bot_username>?start=owner=<your_owner_token>")
+	})
+
+	t.Run("rejects legacy raw token", func(t *testing.T) {
+		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+
+		err := handler.onCommand(context.Background(), newStartEvent("secret-token", 101, 9001))
+		if err != nil {
+			t.Fatalf("onCommand(): %v", err)
+		}
+
+		if store.HasOwner() {
+			t.Fatal("owner registered unexpectedly")
+		}
+		assertLastSentContains(t, tgClient, "Invalid /start format")
+		assertLastSentContains(t, tgClient, "/start owner=<your_owner_token>")
 	})
 
 	t.Run("rejects malformed start assignment", func(t *testing.T) {
@@ -233,7 +339,7 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 		if store.HasOwner() {
 			t.Fatal("owner registered unexpectedly")
 		}
-		assertLastSentContains(t, tgClient, "To authenticate, send /start <your_owner_token>")
+		assertLastSentContains(t, tgClient, "To authenticate, send /start owner=<your_owner_token>")
 	})
 }
 
@@ -261,12 +367,62 @@ func TestStartHandlerOnCommand_ExistingOwner_StartsRootWhenMissing(t *testing.T)
 	assertLastSentContains(t, tgClient, "You are already registered as the bot owner. Relay mode is active.")
 }
 
+func TestStartHandlerOnCommand_ExistingOwnerExplicitOwnerModeReactivates(t *testing.T) {
+	handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+	relay := &fakeRelayOwnerActivator{}
+	handler.SetRelayHandler(relay)
+
+	registered, err := store.RegisterOwner(101, 0, "owner", "Owner", "", true)
+	if err != nil {
+		t.Fatalf("RegisterOwner(): %v", err)
+	}
+	if !registered {
+		t.Fatal("owner should be newly registered")
+	}
+
+	err = handler.onCommand(context.Background(), newStartEvent("owner=wrong-token", 101, 9001))
+	if err != nil {
+		t.Fatalf("onCommand(): %v", err)
+	}
+
+	if len(relay.calls) != 1 {
+		t.Fatalf("ActivateOwner calls = %d, want 1", len(relay.calls))
+	}
+	assertLastSentContains(t, tgClient, "You are already registered as the bot owner. Relay mode is active.")
+}
+
+func TestStartHandlerOnCommand_InviteModeRegistersCollaborator(t *testing.T) {
+	handler, _, inviteStore, collaboratorStore, tgClient := newStartHandlerFullTestHarness(t, "secret-token")
+
+	token, _, err := inviteStore.CreateInvite(context.Background(), "101")
+	if err != nil {
+		t.Fatalf("CreateInvite(): %v", err)
+	}
+
+	err = handler.onCommand(context.Background(), newStartEvent("invite="+token, 202, 9002))
+	if err != nil {
+		t.Fatalf("onCommand(): %v", err)
+	}
+
+	collaborator, ok, err := collaboratorStore.GetCollaborator(context.Background(), "202")
+	if err != nil {
+		t.Fatalf("GetCollaborator(): %v", err)
+	}
+	if !ok {
+		t.Fatal("collaborator not registered")
+	}
+	if collaborator.AddedBy != "101" {
+		t.Fatalf("collaborator.AddedBy = %q, want %q", collaborator.AddedBy, "101")
+	}
+	assertLastSentContains(t, tgClient, "Welcome! You are now a bot collaborator.")
+}
+
 func TestStartHandlerOnCommand_RelayActivationFailure_DoesNotClaimRelayActive(t *testing.T) {
 	handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
 	relay := &fakeRelayOwnerActivator{err: errors.New("precreate failed")}
 	handler.SetRelayHandler(relay)
 
-	err := handler.onCommand(context.Background(), newStartEvent("secret-token", 101, 9001))
+	err := handler.onCommand(context.Background(), newStartEvent("owner=secret-token", 101, 9001))
 	if err != nil {
 		t.Fatalf("onCommand(): %v", err)
 	}
@@ -318,21 +474,35 @@ func TestStartHandlerOnCommand_SendErrorBubblesUp(t *testing.T) {
 func newStartHandlerTestHarness(t *testing.T, authToken string) (*StartHandler, *auth.OwnerStore, *fakeTelegramClient) {
 	t.Helper()
 
+	handler, ownerStore, _, _, tgClient := newStartHandlerFullTestHarness(t, authToken)
+	return handler, ownerStore, tgClient
+}
+
+func newStartHandlerFullTestHarness(t *testing.T, authToken string) (*StartHandler, *auth.OwnerStore, *auth.InviteStore, *auth.CollaboratorStore, *fakeTelegramClient) {
+	t.Helper()
+
 	stateStore := &fakeOwnerKVStore{}
 	ownerStore, err := auth.NewOwnerStore(stateStore)
 	if err != nil {
 		t.Fatalf("NewOwnerStore(): %v", err)
 	}
+	inviteStore, err := auth.NewInviteStore(&fakeInviteKVStore{})
+	if err != nil {
+		t.Fatalf("NewInviteStore(): %v", err)
+	}
+	collaboratorStore := auth.NewCollaboratorStore(&fakeCollaboratorBackingStore{})
 
 	tgClient := &fakeTelegramClient{}
 	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
 	handler := NewStartHandler(StartHandlerParams{
-		OwnerStore: ownerStore,
-		Messenger:  msg,
-		AuthToken:  authToken,
+		OwnerStore:        ownerStore,
+		InviteStore:       inviteStore,
+		CollaboratorStore: collaboratorStore,
+		Messenger:         msg,
+		AuthToken:         authToken,
 	})
 
-	return handler, ownerStore, tgClient
+	return handler, ownerStore, inviteStore, collaboratorStore, tgClient
 }
 
 func newStartEvent(args string, userID, chatID int64) *events.CommandEvent {

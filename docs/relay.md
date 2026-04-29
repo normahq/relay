@@ -222,7 +222,7 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
   - Default: `.config/relay`
 - owner auth token is generated during `relay init`, persisted in `relay.db`, and reused by `relay start`
   - if token is missing in existing state, `relay start` backfills one-time and persists it
-  - startup logs expose auth link via `auth_url` field
+  - startup logs expose auth link via `auth_url` field using `/start owner=<token>`
 - bundled relay MCP listener always binds to local ephemeral address (`127.0.0.1:0`)
   - bundled routes on this listener:
     - `/mcp` and `/mcp/relay` for the built-in relay MCP server
@@ -318,7 +318,7 @@ Relay runs with a single provider per process (`relay.provider`).
 1. Startup order enforces internal MCP -> relay provider -> bot runtime.
 2. Polling mode starts by default when `relay.telegram.webhook.enabled=false`.
 3. Webhook mode (`relay.telegram.webhook.enabled=true`) fails fast without `relay.telegram.webhook.url`.
-4. `/start <token>` registers owner once; non-owner traffic is rejected.
+4. `/start owner=<token>` registers owner once; `/start invite=<token>` onboards collaborators; non-owner traffic is otherwise rejected.
 5. `/topic <name>` creates topic + relay session and persists session metadata.
 6. `/topic` without name returns usage error.
 7. Restart clears in-memory sessions but topic sessions are lazy-restored from persisted metadata.
