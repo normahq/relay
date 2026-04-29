@@ -20,6 +20,11 @@ import (
 	"google.golang.org/genai"
 )
 
+const (
+	relayRunTurnGenericEmptyTerminalMessage = "The provider ended the turn without a usable reply. Please try again."
+	relayRunTurnFinalAnswerText             = "final answer"
+)
+
 type relayRunTurnTelegramClient struct {
 	client.ClientWithResponsesInterface
 	drafts      []client.SendMessageDraftJSONRequestBody
@@ -133,7 +138,7 @@ func TestRunTurn_SendsProgressForNonTerminalEventsInDM(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if !strings.Contains(tgClient.messages[0].Text, "final answer") {
+	if !strings.Contains(tgClient.messages[0].Text, relayRunTurnFinalAnswerText) {
 		t.Fatalf("message text = %q, want to contain final answer", tgClient.messages[0].Text)
 	}
 	if tgClient.messages[0].ParseMode == nil || *tgClient.messages[0].ParseMode != "MarkdownV2" {
@@ -171,7 +176,7 @@ func TestRunTurn_SkipsTypingAndDraftWhenAllProgressDisabled(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if !strings.Contains(tgClient.messages[0].Text, "final answer") {
+	if !strings.Contains(tgClient.messages[0].Text, relayRunTurnFinalAnswerText) {
 		t.Fatalf("message text = %q, want to contain final answer", tgClient.messages[0].Text)
 	}
 }
@@ -211,7 +216,7 @@ func TestRunTurn_SendsTypingWithoutThinkingDraftInPublicChat(t *testing.T) {
 	}
 }
 
-func TestRunTurn_SendsProgressForNonThoughtEvents(t *testing.T) {
+func TestRunTurn_SendsProgressAndGenericMessageForNonThoughtEventsWithoutFinalReply(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -257,8 +262,11 @@ func TestRunTurn_SendsProgressForNonThoughtEvents(t *testing.T) {
 	if len(tgClient.drafts) != 0 {
 		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
 	}
-	if len(tgClient.messages) != 0 {
-		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnGenericEmptyTerminalMessage {
+		t.Fatalf("message text = %q, want %q", got, relayRunTurnGenericEmptyTerminalMessage)
 	}
 }
 
@@ -406,10 +414,10 @@ func TestRunTurn_SkipsExactDuplicateFinalAfterStreamedText(t *testing.T) {
 	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
 		partial := adksession.NewEvent(invocationID)
 		partial.Partial = true
-		partial.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		partial.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
 
 		final := adksession.NewEvent(invocationID)
-		final.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		final.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
 
 		done := adksession.NewEvent(invocationID)
 		done.TurnComplete = true
@@ -424,7 +432,7 @@ func TestRunTurn_SkipsExactDuplicateFinalAfterStreamedText(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := strings.TrimSpace(tgClient.messages[0].Text); got != "final answer" {
+	if got := strings.TrimSpace(tgClient.messages[0].Text); got != relayRunTurnFinalAnswerText {
 		t.Fatalf("message text = %q, want final answer", tgClient.messages[0].Text)
 	}
 }
@@ -518,7 +526,7 @@ func TestRunTurn_AppendsFinalResponseTextEventsOnTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_DoesNotSendOnlyNonFinalTextOnTurnComplete(t *testing.T) {
+func TestRunTurn_SendsGenericMessageWhenOnlyNonFinalTextExistsOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -562,8 +570,11 @@ func TestRunTurn_DoesNotSendOnlyNonFinalTextOnTurnComplete(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 0 {
-		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnGenericEmptyTerminalMessage {
+		t.Fatalf("message text = %q, want %q", got, relayRunTurnGenericEmptyTerminalMessage)
 	}
 }
 
@@ -672,7 +683,7 @@ func TestRunTurn_SendsFinalTextFromTurnCompleteEvent(t *testing.T) {
 		}
 
 		done := adksession.NewEvent(invocationID)
-		done.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
 		done.FinishReason = genai.FinishReasonStop
 		done.TurnComplete = true
 
@@ -686,7 +697,7 @@ func TestRunTurn_SendsFinalTextFromTurnCompleteEvent(t *testing.T) {
 	if len(tgClient.messages) != 1 {
 		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
-	if got := tgClient.messages[0].Text; got != "final answer" {
+	if got := tgClient.messages[0].Text; got != relayRunTurnFinalAnswerText {
 		t.Fatalf("message text = %q, want final answer", got)
 	}
 }
@@ -709,7 +720,7 @@ func TestRunTurn_DoesNotSendWithoutTurnComplete(t *testing.T) {
 
 	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
 		final := adksession.NewEvent(invocationID)
-		final.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		final.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
 		return []*adksession.Event{final}
 	})
 	locator := relaysession.NewTelegramSessionLocator(9001, 77)
@@ -722,7 +733,7 @@ func TestRunTurn_DoesNotSendWithoutTurnComplete(t *testing.T) {
 	}
 }
 
-func TestRunTurn_DoesNotSendOnlyPartialTextOnTurnComplete(t *testing.T) {
+func TestRunTurn_SendsGenericMessageWhenOnlyPartialTextExistsOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -757,12 +768,15 @@ func TestRunTurn_DoesNotSendOnlyPartialTextOnTurnComplete(t *testing.T) {
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 0 {
-		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnGenericEmptyTerminalMessage {
+		t.Fatalf("message text = %q, want %q", got, relayRunTurnGenericEmptyTerminalMessage)
 	}
 }
 
-func TestRunTurn_DoesNotSendOnlyPartialMarkdownChunksOnTurnComplete(t *testing.T) {
+func TestRunTurn_SendsGenericMessageWhenOnlyPartialMarkdownChunksExistOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -801,12 +815,15 @@ func TestRunTurn_DoesNotSendOnlyPartialMarkdownChunksOnTurnComplete(t *testing.T
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 0 {
-		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnGenericEmptyTerminalMessage {
+		t.Fatalf("message text = %q, want %q", got, relayRunTurnGenericEmptyTerminalMessage)
 	}
 }
 
-func TestRunTurn_DoesNotSendOnlyThoughtOrPartialTextOnTurnComplete(t *testing.T) {
+func TestRunTurn_SendsGenericMessageWhenOnlyThoughtOrPartialTextExistsOnTurnComplete(t *testing.T) {
 	t.Parallel()
 
 	tgClient := &relayRunTurnTelegramClient{}
@@ -846,8 +863,124 @@ func TestRunTurn_DoesNotSendOnlyThoughtOrPartialTextOnTurnComplete(t *testing.T)
 		t.Fatalf("runTurn() error = %v", err)
 	}
 
-	if len(tgClient.messages) != 0 {
-		t.Fatalf("message calls = %d, want 0", len(tgClient.messages))
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnGenericEmptyTerminalMessage {
+		t.Fatalf("message text = %q, want %q", got, relayRunTurnGenericEmptyTerminalMessage)
+	}
+}
+
+func TestRunTurn_SendsFinishReasonMessageOnEmptyTurnComplete(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		finishReason genai.FinishReason
+		want         string
+	}{
+		{name: "empty", finishReason: genai.FinishReason(""), want: relayRunTurnGenericEmptyTerminalMessage},
+		{name: "unspecified", finishReason: genai.FinishReasonUnspecified, want: relayRunTurnGenericEmptyTerminalMessage},
+		{name: "stop", finishReason: genai.FinishReasonStop, want: relayRunTurnGenericEmptyTerminalMessage},
+		{name: "max tokens", finishReason: genai.FinishReasonMaxTokens, want: "The provider hit the output limit before producing a visible reply. Ask for a shorter answer or split the request."},
+		{name: "safety", finishReason: genai.FinishReasonSafety, want: "The provider blocked this turn for safety reasons. Please rephrase and try again."},
+		{name: "recitation", finishReason: genai.FinishReasonRecitation, want: "The provider blocked this turn because it may reproduce protected source material. Please rephrase and try again."},
+		{name: "language", finishReason: genai.FinishReasonLanguage, want: "The provider could not answer because the request used an unsupported language. Please rephrase in a supported language and try again."},
+		{name: "other", finishReason: genai.FinishReasonOther, want: relayRunTurnGenericEmptyTerminalMessage},
+		{name: "blocklist", finishReason: genai.FinishReasonBlocklist, want: "The provider blocked this turn because it matched restricted terms. Please rephrase and try again."},
+		{name: "prohibited content", finishReason: genai.FinishReasonProhibitedContent, want: "The provider rejected this turn as prohibited content. Please rephrase and try again."},
+		{name: "spii", finishReason: genai.FinishReasonSPII, want: "The provider blocked this turn because it may contain sensitive personal information. Please remove that information and try again."},
+		{name: "malformed function call", finishReason: genai.FinishReasonMalformedFunctionCall, want: "The provider ended the turn with an invalid function call. Please try again."},
+		{name: "unexpected tool call", finishReason: genai.FinishReasonUnexpectedToolCall, want: "The provider ended the turn with an unexpected tool call. Please try again."},
+		{name: "image safety", finishReason: genai.FinishReasonImageSafety, want: "The provider blocked image generation for safety reasons. Please try a different request."},
+		{name: "image prohibited content", finishReason: genai.FinishReasonImageProhibitedContent, want: "The provider rejected image generation as prohibited content. Please try a different request."},
+		{name: "no image", finishReason: genai.FinishReasonNoImage, want: "The provider completed the turn without returning an image. Please try a different request."},
+		{name: "image recitation", finishReason: genai.FinishReasonImageRecitation, want: "The provider blocked image generation because it may reproduce protected source material. Please try a different request."},
+		{name: "image other", finishReason: genai.FinishReasonImageOther, want: "The provider ended image generation without a usable result. Please try again."},
+		{name: "unknown", finishReason: genai.FinishReason("MYSTERY"), want: relayRunTurnGenericEmptyTerminalMessage},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h, tgClient := newRelayRunTurnTestHandler(t, false)
+			adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+				done := adksession.NewEvent(invocationID)
+				done.FinishReason = tt.finishReason
+				done.TurnComplete = true
+
+				return []*adksession.Event{done}
+			})
+			locator := relaysession.NewTelegramSessionLocator(9001, 77)
+			if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+				t.Fatalf("runTurn() error = %v", err)
+			}
+
+			if len(tgClient.messages) != 1 {
+				t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+			}
+			if got := tgClient.messages[0].Text; got != tt.want {
+				t.Fatalf("message text = %q, want %q", got, tt.want)
+			}
+			if tgClient.messages[0].ParseMode != nil {
+				t.Fatalf("parse_mode = %v, want nil", *tgClient.messages[0].ParseMode)
+			}
+		})
+	}
+}
+
+func TestRunTurn_AppendsProviderMessageExcerptForEmptyTurnComplete(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, false)
+	rawMessage := "line   one\nline\t two   " + strings.Repeat("x", 400)
+	expectedExcerpt := "line one line two " + strings.Repeat("x", 282)
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		done := adksession.NewEvent(invocationID)
+		done.FinishReason = genai.FinishReasonProhibitedContent
+		done.ErrorMessage = rawMessage
+		done.TurnComplete = true
+
+		return []*adksession.Event{done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	want := "The provider rejected this turn as prohibited content. Please rephrase and try again.\n\nProvider message: " + expectedExcerpt
+	if got := tgClient.messages[0].Text; got != want {
+		t.Fatalf("message text = %q, want %q", got, want)
+	}
+}
+
+func TestRunTurn_DoesNotAppendFinishReasonMessageWhenFinalTextExists(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, true)
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.FinishReason = genai.FinishReasonMaxTokens
+		done.TurnComplete = true
+
+		return []*adksession.Event{done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, relaychannel.ProgressPolicy{}); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnFinalAnswerText {
+		t.Fatalf("message text = %q, want final answer", got)
 	}
 }
 
@@ -868,13 +1001,33 @@ func newRelayRunTurnTestRunner(t *testing.T) (*runner.Runner, string) {
 		}
 
 		reply := adksession.NewEvent(invocationID)
-		reply.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+		reply.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
 
 		done := adksession.NewEvent(invocationID)
 		done.TurnComplete = true
 
 		return []*adksession.Event{thoughtOne, thoughtTwo, reply, done}
 	})
+}
+
+func newRelayRunTurnTestHandler(t *testing.T, agentReplyFormattingNone bool) (*RelayHandler, *relayRunTurnTelegramClient) {
+	t.Helper()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	if agentReplyFormattingNone {
+		msg.SetAgentReplyFormattingMode("none")
+	}
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+
+	return &RelayHandler{
+		channel: channel,
+		logger:  zerolog.Nop(),
+	}, tgClient
 }
 
 func newRelayRunTurnTestRunnerWithEvents(
