@@ -111,7 +111,7 @@ func TestBuildAuthURL(t *testing.T) {
 	})
 }
 
-func TestLogRelayStartup_DoesNotLogOwnerTokenField(t *testing.T) {
+func TestLogRelayStartup_DoesNotLogOwnerAuth(t *testing.T) {
 	var buf bytes.Buffer
 	prevLogger := log.Logger
 	log.Logger = zerolog.New(&buf)
@@ -119,13 +119,19 @@ func TestLogRelayStartup_DoesNotLogOwnerTokenField(t *testing.T) {
 		log.Logger = prevLogger
 	})
 
-	logRelayStartup(context.Background(), "", "token123")
+	logRelayStartup(context.Background(), "")
 
 	output := buf.String()
-	if !strings.Contains(output, `"auth_url":"https://t.me/<bot_username>?start=owner_token123"`) {
-		t.Fatalf("startup log missing auth_url field, output=%q", output)
+	if strings.Contains(output, "token123") {
+		t.Fatalf("startup log must not include owner token, output=%q", output)
+	}
+	if strings.Contains(output, `"auth_url"`) {
+		t.Fatalf("startup log must not include auth_url field, output=%q", output)
 	}
 	if strings.Contains(output, `"owner_token"`) {
 		t.Fatalf("startup log must not include owner_token field, output=%q", output)
+	}
+	if !strings.Contains(output, "Relay bot started. Press Ctrl+C to stop.") {
+		t.Fatalf("startup log missing startup message, output=%q", output)
 	}
 }

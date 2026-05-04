@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	relayapp "github.com/normahq/relay/internal/apps/relay"
@@ -164,6 +166,31 @@ func TestNewRootCommand_RegistersCommandsAndFlags(t *testing.T) {
 		if cmd.PersistentFlags().Lookup(name) == nil {
 			t.Fatalf("missing persistent flag %q", name)
 		}
+	}
+}
+
+func TestNewRootCommand_VersionFlag(t *testing.T) {
+	cmd, err := newRootCommand()
+	if err != nil {
+		t.Fatalf("newRootCommand: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--version"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute(--version): %v", err)
+	}
+
+	got := out.String()
+	if !strings.HasPrefix(got, "relay ") {
+		t.Fatalf("version output = %q, want relay prefix", got)
+	}
+	if !strings.Contains(got, "commit ") {
+		t.Fatalf("version output = %q, want commit metadata", got)
+	}
+	if !strings.Contains(got, "built ") {
+		t.Fatalf("version output = %q, want build date metadata", got)
 	}
 }
 

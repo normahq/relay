@@ -95,7 +95,7 @@ func startCommand() *cobra.Command {
 				return fmt.Errorf("starting relay app: %w", err)
 			}
 
-			logRelayStartup(ctx, relayCfg.Relay.Telegram.Token, ownerToken)
+			logRelayStartup(ctx, relayCfg.Relay.Telegram.Token)
 
 			<-ctx.Done()
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)

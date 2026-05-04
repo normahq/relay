@@ -1,0 +1,12 @@
+.git/
+.beads/
+.config/relay/
+.env
+.codex
+.claude/
+.idea/
+dist/
+coverage.out
+*.db
+*.db-*
+*.test

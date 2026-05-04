@@ -19,14 +19,13 @@ type botIdentity struct {
 	username string
 }
 
-func logRelayStartup(ctx context.Context, botToken, ownerToken string) {
+func logRelayStartup(ctx context.Context, botToken string) {
 	identity, err := loadBotIdentityFromToken(ctx, botToken)
 	if err != nil {
 		log.Warn().Err(err).Msg("failed to load bot identity for startup log")
 	}
 
-	event := log.Info().
-		Str("auth_url", buildAuthURL(identity.username, ownerToken))
+	event := log.Info()
 	if identity.name != "" {
 		event = event.Str("bot_name", identity.name)
 	}

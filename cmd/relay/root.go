@@ -32,8 +32,9 @@ func newRootCommand() (*cobra.Command, error) {
 	cobra.OnInitialize(initDotEnv)
 
 	cmd := &cobra.Command{
-		Use:   "relay",
-		Short: "relay is a standalone Telegram relay server for norma",
+		Use:     "relay",
+		Short:   "relay is a standalone Telegram relay server for norma",
+		Version: buildVersionString(),
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			logLevel := logging.LevelInfo
 			if debug {
@@ -45,6 +46,7 @@ func newRootCommand() (*cobra.Command, error) {
 			return logging.Init(logging.WithLevel(logLevel))
 		},
 	}
+	cmd.SetVersionTemplate("{{.Version}}\n")
 
 	cmd.PersistentFlags().StringVar(&configDir, "config-dir", "", "extra config root directory (highest priority)")
 	cmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")

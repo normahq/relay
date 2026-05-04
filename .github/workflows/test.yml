@@ -16,6 +16,8 @@ jobs:
           go-version-file: 'go.mod'
       - name: Test
         run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Vulnerability check
+        run: go tool govulncheck ./...
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:

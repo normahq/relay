@@ -30,6 +30,8 @@ jobs:
             echo "GITHUB_REF_NAME is required"
             exit 1
           fi
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-s -w -X main.version=${version} -X main.commit=${GITHUB_SHA} -X main.date=${build_date}"
 
           binary="relay"
           main_pkg="./cmd/relay"
@@ -55,7 +57,7 @@ jobs:
             fi
 
             GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
-              go build -trimpath -ldflags="-s -w" -o "${workdir}/${out_name}" "${main_pkg}"
+              go build -trimpath -ldflags="${ldflags}" -o "${workdir}/${out_name}" "${main_pkg}"
             cp README.md LICENSE "${workdir}/"
 
             tar -C dist -czf "dist/${artifact}.tar.gz" "${artifact}"

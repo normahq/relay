@@ -18,7 +18,7 @@ profiles:
       - os: windows
         arch: amd64
     build:
-      ldflags: -s -w
+      ldflags: -s -w -X main.version=${OMNIDIST_VERSION} -X main.commit=${OMNIDIST_GIT_COMMIT} -X main.date=${OMNIDIST_BUILD_DATE}
       tags: []
       cgo: false
     distributions:

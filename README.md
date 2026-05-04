@@ -34,7 +34,7 @@ relay start
 ```
 
 3. Authenticate in Telegram:
-- open the auth URL printed by `relay init`/`relay start`, or
+- open the auth URL printed by `relay init`, or
 - send `/start owner=<owner_token>` in a direct message to your bot
 
 4. Start a topic session:
@@ -235,6 +235,7 @@ The built-in `relay` MCP server is always reserved for Relay’s own tools. Do n
 ## Documentation
 
 - Technical specification: [`docs/relay.md`](docs/relay.md)
+- Release notes: [`docs/release-notes.md`](docs/release-notes.md)
 - Telegram formatting guide: [`docs/telegram-formatting.md`](docs/telegram-formatting.md)
 - Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Agent workflow/policies: [`AGENTS.md`](AGENTS.md)

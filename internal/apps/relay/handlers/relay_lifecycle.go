@@ -165,8 +165,7 @@ func (h *RelayHandler) initializeBotUsername(ctx context.Context) error {
 	h.mu.Unlock()
 
 	if h.authToken != "" {
-		deeplink := fmt.Sprintf("https://t.me/%s?start=owner_%s", username, h.authToken)
-		h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Str("start_deeplink", deeplink).Msg("relay start deeplink ready")
+		h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Bool("owner_auth_available", true).Msg("relay owner auth available")
 		return nil
 	}
 	h.logger.Info().Int64("bot_user_id", botUserID).Str("bot_username", username).Msg("relay bot identity loaded")
