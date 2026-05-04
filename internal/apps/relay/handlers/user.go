@@ -210,5 +210,5 @@ func buildInviteLink(botUsername, inviteToken string) string {
 	if username == "" {
 		username = "<bot_username>"
 	}
-	return fmt.Sprintf("https://t.me/%s?start=invite=%s", username, inviteToken)
+	return fmt.Sprintf("https://t.me/%s?start=invite_%s", username, inviteToken)
 }

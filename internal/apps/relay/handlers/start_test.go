@@ -202,8 +202,24 @@ func TestParseStartCommandArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "owner deeplink payload",
+			raw:  "owner_abc123",
+			wantArgs: startCommandArgs{
+				mode:  startModeOwner,
+				token: "abc123",
+			},
+		},
+		{
 			name: "invite token",
 			raw:  "invite=abc123",
+			wantArgs: startCommandArgs{
+				mode:  startModeInvite,
+				token: "abc123",
+			},
+		},
+		{
+			name: "invite deeplink payload",
+			raw:  "invite_abc123",
 			wantArgs: startCommandArgs{
 				mode:  startModeInvite,
 				token: "abc123",
@@ -236,7 +252,12 @@ func TestParseStartCommandArgs(t *testing.T) {
 		},
 		{
 			name:          "missing value rejected",
-			raw:           "owner=",
+			raw:           "invite=",
+			wantMalformed: true,
+		},
+		{
+			name:          "missing deeplink value rejected",
+			raw:           "invite_",
 			wantMalformed: true,
 		},
 	}
@@ -255,7 +276,7 @@ func TestParseStartCommandArgs(t *testing.T) {
 }
 
 func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
-	t.Run("accepts slash-start token", func(t *testing.T) {
+	t.Run("accepts owner command as owner bootstrap", func(t *testing.T) {
 		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
 		relay := &fakeRelayOwnerActivator{}
 		handler.SetRelayHandler(relay)
@@ -284,6 +305,25 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 		assertLastSentContains(t, tgClient, "Congratulations")
 	})
 
+	t.Run("accepts owner deeplink payload as owner bootstrap", func(t *testing.T) {
+		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+		relay := &fakeRelayOwnerActivator{}
+		handler.SetRelayHandler(relay)
+
+		err := handler.onCommand(context.Background(), newStartEvent("owner_secret-token", 101, 9001))
+		if err != nil {
+			t.Fatalf("onCommand(): %v", err)
+		}
+
+		if !store.HasOwner() {
+			t.Fatal("owner not registered")
+		}
+		if len(relay.calls) != 1 {
+			t.Fatalf("ActivateOwner calls = %d, want 1", len(relay.calls))
+		}
+		assertLastSentContains(t, tgClient, "Congratulations")
+	})
+
 	t.Run("rejects malformed question-mark token", func(t *testing.T) {
 		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
 
@@ -296,7 +336,7 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 			t.Fatal("owner registered unexpectedly")
 		}
 		assertLastSentContains(t, tgClient, "Invalid /start format")
-		assertLastSentContains(t, tgClient, "https://t.me/<bot_username>?start=owner=<your_owner_token>")
+		assertLastSentContains(t, tgClient, "https://t.me/<bot_username>?start=owner_<your_owner_token>")
 	})
 
 	t.Run("rejects legacy raw token", func(t *testing.T) {
@@ -314,7 +354,7 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 		assertLastSentContains(t, tgClient, "/start owner=<your_owner_token>")
 	})
 
-	t.Run("rejects malformed start assignment", func(t *testing.T) {
+	t.Run("rejects legacy start assignment", func(t *testing.T) {
 		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
 
 		err := handler.onCommand(context.Background(), newStartEvent("start=secret-token", 101, 9001))
@@ -326,6 +366,20 @@ func TestStartHandlerOnCommand_StrictAuthFlow(t *testing.T) {
 			t.Fatal("owner registered unexpectedly")
 		}
 		assertLastSentContains(t, tgClient, "Invalid /start format")
+	})
+
+	t.Run("rejects invalid owner token", func(t *testing.T) {
+		handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+
+		err := handler.onCommand(context.Background(), newStartEvent("owner=wrong-token", 101, 9001))
+		if err != nil {
+			t.Fatalf("onCommand(): %v", err)
+		}
+
+		if store.HasOwner() {
+			t.Fatal("owner registered unexpectedly")
+		}
+		assertLastSentContains(t, tgClient, "Invalid authentication token")
 	})
 
 	t.Run("keeps welcome flow for empty args", func(t *testing.T) {
@@ -391,8 +445,64 @@ func TestStartHandlerOnCommand_ExistingOwnerExplicitOwnerModeReactivates(t *test
 	assertLastSentContains(t, tgClient, "You are already registered as the bot owner. Relay mode is active.")
 }
 
+func TestStartHandlerOnCommand_ExistingOwnerInviteModeDoesNotReactivate(t *testing.T) {
+	handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+	relay := &fakeRelayOwnerActivator{}
+	handler.SetRelayHandler(relay)
+
+	registered, err := store.RegisterOwner(101, 0, "owner", "Owner", "", true)
+	if err != nil {
+		t.Fatalf("RegisterOwner(): %v", err)
+	}
+	if !registered {
+		t.Fatal("owner should be newly registered")
+	}
+
+	err = handler.onCommand(context.Background(), newStartEvent("invite=secret-token", 101, 9001))
+	if err != nil {
+		t.Fatalf("onCommand(): %v", err)
+	}
+
+	if len(relay.calls) != 0 {
+		t.Fatalf("ActivateOwner calls = %d, want 0", len(relay.calls))
+	}
+	assertLastSentContains(t, tgClient, "You are already the bot owner.")
+}
+
+func TestStartHandlerOnCommand_ExistingOwnerOtherInviteDoesNotConsumeOrReactivate(t *testing.T) {
+	handler, store, tgClient := newStartHandlerTestHarness(t, "secret-token")
+	relay := &fakeRelayOwnerActivator{}
+	handler.SetRelayHandler(relay)
+
+	registered, err := store.RegisterOwner(101, 0, "owner", "Owner", "", true)
+	if err != nil {
+		t.Fatalf("RegisterOwner(): %v", err)
+	}
+	if !registered {
+		t.Fatal("owner should be newly registered")
+	}
+
+	err = handler.onCommand(context.Background(), newStartEvent("invite=other-token", 101, 9001))
+	if err != nil {
+		t.Fatalf("onCommand(): %v", err)
+	}
+
+	if len(relay.calls) != 0 {
+		t.Fatalf("ActivateOwner calls = %d, want 0", len(relay.calls))
+	}
+	assertLastSentContains(t, tgClient, "You are already the bot owner.")
+}
+
 func TestStartHandlerOnCommand_InviteModeRegistersCollaborator(t *testing.T) {
-	handler, _, inviteStore, collaboratorStore, tgClient := newStartHandlerFullTestHarness(t, "secret-token")
+	handler, ownerStore, inviteStore, collaboratorStore, tgClient := newStartHandlerFullTestHarness(t, "secret-token")
+
+	registered, err := ownerStore.RegisterOwner(101, 9001, "owner", "Owner", "", true)
+	if err != nil {
+		t.Fatalf("RegisterOwner(): %v", err)
+	}
+	if !registered {
+		t.Fatal("owner should be newly registered")
+	}
 
 	token, _, err := inviteStore.CreateInvite(context.Background(), "101")
 	if err != nil {

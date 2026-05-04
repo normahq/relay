@@ -96,7 +96,7 @@ func TestLoadBotIdentity(t *testing.T) {
 func TestBuildAuthURL(t *testing.T) {
 	t.Run("with username", func(t *testing.T) {
 		got := buildAuthURL("NormaBot", "token123")
-		want := "https://t.me/NormaBot?start=owner=token123"
+		want := "https://t.me/NormaBot?start=owner_token123"
 		if got != want {
 			t.Fatalf("buildAuthURL() = %q, want %q", got, want)
 		}
@@ -104,7 +104,7 @@ func TestBuildAuthURL(t *testing.T) {
 
 	t.Run("fallback username placeholder", func(t *testing.T) {
 		got := buildAuthURL(" ", "token123")
-		want := "https://t.me/<bot_username>?start=owner=token123"
+		want := "https://t.me/<bot_username>?start=owner_token123"
 		if got != want {
 			t.Fatalf("buildAuthURL() = %q, want %q", got, want)
 		}
@@ -122,7 +122,7 @@ func TestLogRelayStartup_DoesNotLogOwnerTokenField(t *testing.T) {
 	logRelayStartup(context.Background(), "", "token123")
 
 	output := buf.String()
-	if !strings.Contains(output, `"auth_url":"https://t.me/<bot_username>?start=owner=token123"`) {
+	if !strings.Contains(output, `"auth_url":"https://t.me/<bot_username>?start=owner_token123"`) {
 		t.Fatalf("startup log missing auth_url field, output=%q", output)
 	}
 	if strings.Contains(output, `"owner_token"`) {

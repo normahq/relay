@@ -73,5 +73,5 @@ func buildAuthURL(botUsername, ownerToken string) string {
 	if username == "" {
 		username = "<bot_username>"
 	}
-	return fmt.Sprintf("https://t.me/%s?start=owner=%s", username, ownerToken)
+	return fmt.Sprintf("https://t.me/%s?start=owner_%s", username, ownerToken)
 }

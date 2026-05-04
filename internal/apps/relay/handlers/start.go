@@ -91,6 +91,17 @@ func (h *StartHandler) onCommand(ctx context.Context, event *events.CommandEvent
 
 	args, malformed := parseStartCommandArgs(event.Args)
 
+	if malformed {
+		log.Warn().
+			Int64("user_id", userID).
+			Int64("chat_id", chatID).
+			Msg("Malformed /start argument")
+		if err := h.messenger.SendPlain(ctx, chatID, malformedStartFormatMessage(), 0); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if h.ownerStore.HasOwner() {
 		if args.mode == startModeInvite {
 			return h.handleInviteStart(ctx, chatID, userID, userIDStr, args.token, event.Message.From)
@@ -110,17 +121,6 @@ func (h *StartHandler) onCommand(ctx context.Context, event *events.CommandEvent
 			return nil
 		}
 		if err := h.messenger.SendPlain(ctx, chatID, "Bot owner is already registered. Only the owner can use this bot.", 0); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if malformed {
-		log.Warn().
-			Int64("user_id", userID).
-			Int64("chat_id", chatID).
-			Msg("Malformed /start auth argument")
-		if err := h.messenger.SendPlain(ctx, chatID, malformedStartFormatMessage(), 0); err != nil {
 			return err
 		}
 		return nil
@@ -195,14 +195,30 @@ func parseStartCommandArgs(raw string) (startCommandArgs, bool) {
 	}
 
 	assignment := fields[0]
-	if strings.HasPrefix(assignment, "?") || strings.Count(assignment, "=") != 1 {
+	if strings.HasPrefix(assignment, "?") {
 		return startCommandArgs{}, true
 	}
 
-	key, value, ok := strings.Cut(assignment, "=")
-	if !ok {
+	if strings.HasPrefix(assignment, startModeOwner+"_") {
+		value := strings.TrimSpace(strings.TrimPrefix(assignment, startModeOwner+"_"))
+		if value == "" {
+			return startCommandArgs{}, true
+		}
+		return startCommandArgs{mode: startModeOwner, token: value}, false
+	}
+	if strings.HasPrefix(assignment, startModeInvite+"_") {
+		value := strings.TrimSpace(strings.TrimPrefix(assignment, startModeInvite+"_"))
+		if value == "" {
+			return startCommandArgs{}, true
+		}
+		return startCommandArgs{mode: startModeInvite, token: value}, false
+	}
+
+	if strings.Count(assignment, "=") != 1 {
 		return startCommandArgs{}, true
 	}
+
+	key, value, _ := strings.Cut(assignment, "=")
 	key = strings.TrimSpace(key)
 	value = strings.TrimSpace(value)
 	if key == "" || value == "" {
@@ -218,7 +234,7 @@ func parseStartCommandArgs(raw string) (startCommandArgs, bool) {
 }
 
 func malformedStartFormatMessage() string {
-	return "Invalid /start format. Use one of:\n• /start owner=<your_owner_token>\n• /start invite=<your_invite_token>\n\nIf using a link, use https://t.me/<bot_username>?start=owner=<your_owner_token>"
+	return "Invalid /start format. Use one of:\n• /start owner=<your_owner_token>\n• /start invite=<your_invite_token>\n\nIf using a link, use https://t.me/<bot_username>?start=owner_<your_owner_token>"
 }
 
 type userInfo struct {
