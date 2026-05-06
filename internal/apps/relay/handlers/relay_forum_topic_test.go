@@ -466,7 +466,7 @@ func newRelayMessageHandlerHarness(t *testing.T, topicID int) (*RelayHandler, *f
 	}
 	handler.SetOwner(101, 9001)
 	setUnexportedField(t, handler, "relayProviderName", "alpha")
-	handler.botUsername = "testbot"
+	handler.botUsername = testRelayBotUsername
 	handler.botUserID = 4242
 
 	return handler, turnDispatcher, locator

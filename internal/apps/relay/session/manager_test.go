@@ -556,6 +556,75 @@ func TestRestoreSession_UsesAutoLabelWhenPersistedLabelMissing(t *testing.T) {
 	}
 }
 
+func TestRestoreSession_FailsWhenPersistedWorkspaceBranchMissing(t *testing.T) {
+	ctx := context.Background()
+	workingDir := t.TempDir()
+	initGitRepo(t, ctx, workingDir)
+
+	writeFile(t, filepath.Join(workingDir, "seed.txt"), "seed\n")
+	runGit(t, ctx, workingDir, "add", "seed.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: seed")
+
+	builder := &fakeAgentBuilder{}
+	runtimeManager := &fakeRelayRuntimeManager{providerID: "new-relay-provider"}
+	locator := NewTelegramSessionLocator(12, 44)
+	store := &fakeSessionStore{
+		recordsByAddress: map[string]relaystate.SessionRecord{
+			sessionAddressKey(relaystate.ChannelTypeTelegram, "12:44"): {
+				SessionID:    locator.SessionID,
+				ChannelType:  relaystate.ChannelTypeTelegram,
+				AddressKey:   "12:44",
+				AddressJSON:  `{"chat_id":12,"topic_id":44}`,
+				AgentName:    "persisted",
+				WorkspaceDir: filepath.Join(t.TempDir(), "missing-workspace"),
+				BranchName:   "norma/relay/missing-branch",
+				Status:       relaystate.SessionStatusActive,
+			},
+		},
+	}
+
+	m := &Manager{
+		relayProviderName: "new-relay-provider",
+		runtimeManager:    runtimeManager,
+		agentBuilder:      builder,
+		workingDir:        workingDir,
+		workspaces:        relayagent.NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir)),
+		workspaceEnabled:  true,
+		logger:            zerolog.Nop(),
+		sessions:          make(map[string]*TopicSession),
+		sessionStore:      store,
+	}
+
+	_, err := m.RestoreSession(ctx, SessionContext{
+		Locator: locator,
+		UserID:  "tg-201",
+	})
+	if err == nil {
+		t.Fatal("RestoreSession() error = nil, want missing persisted branch error")
+	}
+	if !strings.Contains(err.Error(), `persisted workspace branch "norma/relay/missing-branch" not found`) {
+		t.Fatalf("RestoreSession() error = %q, want missing persisted branch context", err.Error())
+	}
+}
+
+func TestTakeStartupNotice_ReturnsAndClears(t *testing.T) {
+	m := &Manager{
+		sessions: map[string]*TopicSession{
+			"tg-1-1": {
+				sessionID:     "tg-1-1",
+				startupNotice: "notice text",
+			},
+		},
+	}
+
+	if got := m.TakeStartupNotice("tg-1-1"); got != "notice text" {
+		t.Fatalf("TakeStartupNotice(first) = %q, want %q", got, "notice text")
+	}
+	if got := m.TakeStartupNotice("tg-1-1"); got != "" {
+		t.Fatalf("TakeStartupNotice(second) = %q, want empty string", got)
+	}
+}
+
 type fakeSessionStore struct {
 	deletedSessionID string
 	deleteCtxErr     error
@@ -637,4 +706,9 @@ func runGit(t *testing.T, ctx context.Context, dir string, args ...string) strin
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func currentBranch(t *testing.T, ctx context.Context, dir string) string {
+	t.Helper()
+	return strings.TrimSpace(runGit(t, ctx, dir, "rev-parse", "--abbrev-ref", "HEAD"))
 }

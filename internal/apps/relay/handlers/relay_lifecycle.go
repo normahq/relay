@@ -65,6 +65,7 @@ func (h *RelayHandler) bootstrapOwnerSession(ctx context.Context, ownerID, chatI
 	metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
 	welcomeMsg := BuildAgentWelcomeMessage(ownerSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 	_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
+	h.sendSessionStartupNotice(ctx, locator, ts.GetSessionID())
 
 	h.logger.Info().
 		Int64("owner_id", ownerID).
@@ -72,6 +73,21 @@ func (h *RelayHandler) bootstrapOwnerSession(ctx context.Context, ownerID, chatI
 		Str("agent", relayProviderName).
 		Msg("owner session bootstrapped")
 	return nil
+}
+
+func (h *RelayHandler) sendSessionStartupNotice(ctx context.Context, locator relaysession.SessionLocator, sessionID string) {
+	if h.sessionManager == nil {
+		return
+	}
+
+	notice := strings.TrimSpace(h.sessionManager.TakeStartupNotice(sessionID))
+	if notice == "" {
+		return
+	}
+
+	if err := h.channel.SendPlain(ctx, locator, notice); err != nil {
+		h.logger.Warn().Err(err).Str("session_id", sessionID).Msg("failed to send session startup notice")
+	}
 }
 
 func (h *RelayHandler) getOwnerID() int64 {

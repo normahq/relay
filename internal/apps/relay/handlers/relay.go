@@ -199,6 +199,7 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 			metadata := h.sessionManager.GetAgentMetadata(relayProviderName)
 			welcomeMsg := BuildAgentWelcomeMessage(ownerSessionLabel, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 			_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
+			h.sendSessionStartupNotice(ctx, locator, ts.GetSessionID())
 		}
 	} else {
 		ts, err = h.sessionManager.GetSession(locator)
@@ -237,6 +238,7 @@ func (h *RelayHandler) onMessage(ctx context.Context, event *events.MessageEvent
 				welcomeName := h.welcomeDisplayName(messageCtx, ts)
 				welcomeMsg := BuildAgentWelcomeMessage(welcomeName, ts.GetSessionID(), metadata.Type, metadata.Model, metadata.MCPServers)
 				_ = h.channel.SendMarkdown(ctx, locator, welcomeMsg)
+				h.sendSessionStartupNotice(ctx, locator, ts.GetSessionID())
 			}
 		}
 	}

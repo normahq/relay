@@ -23,6 +23,7 @@ type TopicSession struct {
 	chatID         int64
 	workspaceDir   string
 	branchName     string
+	startupNotice  string
 }
 
 func (s *TopicSession) GetRunner() *runner.Runner {

@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const testWorkspaceBranchContent = "branch\n"
+
 func TestWorkspaceImportDiscardsDirtyChangesAndSyncsToMaster(t *testing.T) {
 	t.Parallel()
 
@@ -74,7 +76,7 @@ func TestWorkspaceImportRebasesCleanBranch(t *testing.T) {
 		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
 	})
 
-	writeFile(t, filepath.Join(workspaceDir, "branch.txt"), "branch\n")
+	writeFile(t, filepath.Join(workspaceDir, "branch.txt"), testWorkspaceBranchContent)
 	runGit(t, ctx, workspaceDir, "add", "branch.txt")
 	runGit(t, ctx, workspaceDir, "commit", "-m", "feat: branch change")
 
@@ -92,7 +94,7 @@ func TestWorkspaceImportRebasesCleanBranch(t *testing.T) {
 		t.Fatalf("expected clean workspace after import, got:\n%s", status)
 	}
 
-	if got := readFile(t, filepath.Join(workspaceDir, "branch.txt")); got != "branch\n" {
+	if got := readFile(t, filepath.Join(workspaceDir, "branch.txt")); got != testWorkspaceBranchContent {
 		t.Fatalf("branch.txt mismatch: got %q", got)
 	}
 	if got := readFile(t, filepath.Join(workspaceDir, "master.txt")); got != "master\n" {
@@ -149,10 +151,11 @@ func TestEnsureWorkspace_UsesStateDirRelaySessionsRoot(t *testing.T) {
 	branchName := "norma/relay/tg-4-5"
 
 	m := NewWorkspaceManager(workingDir, stateDir, currentBranch(t, ctx, workingDir))
-	workspaceDir, err := m.EnsureWorkspace(ctx, sessionID, branchName, "")
+	got, err := m.EnsureWorkspace(ctx, sessionID, branchName, "")
 	if err != nil {
 		t.Fatalf("EnsureWorkspace() error = %v", err)
 	}
+	workspaceDir := got.Dir
 	t.Cleanup(func() {
 		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
 	})
@@ -168,6 +171,103 @@ func TestEnsureWorkspace_UsesStateDirRelaySessionsRoot(t *testing.T) {
 	legacyPath := filepath.Join(workingDir, ".norma", "relay-sessions", sessionID)
 	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
 		t.Fatalf("legacy .norma workspace path exists at %q, err=%v", legacyPath, err)
+	}
+}
+
+func TestEnsureWorkspace_RemountsExistingBranchWithoutSyncWhenImportConflicts(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workingDir := t.TempDir()
+	initGitRepo(t, ctx, workingDir)
+
+	writeFile(t, filepath.Join(workingDir, "conflict.txt"), "base\n")
+	runGit(t, ctx, workingDir, "add", "conflict.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: seed")
+
+	sessionID := "tg-9-9"
+	branchName := "norma/relay/tg-9-9"
+	workspaceDir := filepath.Join(t.TempDir(), "relay-workspace")
+	runGit(t, ctx, workingDir, "worktree", "add", "-b", branchName, workspaceDir, "HEAD")
+	t.Cleanup(func() {
+		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
+	})
+
+	writeFile(t, filepath.Join(workspaceDir, "conflict.txt"), testWorkspaceBranchContent)
+	runGit(t, ctx, workspaceDir, "add", "conflict.txt")
+	runGit(t, ctx, workspaceDir, "commit", "-m", "feat: branch conflict")
+
+	writeFile(t, filepath.Join(workingDir, "conflict.txt"), "main\n")
+	runGit(t, ctx, workingDir, "add", "conflict.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: main conflict")
+
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
+	got, err := m.EnsureWorkspace(ctx, sessionID, branchName, workspaceDir)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	if !got.SyncSkipped {
+		t.Fatal("EnsureWorkspace() SyncSkipped = false, want true")
+	}
+	if got.Dir != workspaceDir {
+		t.Fatalf("EnsureWorkspace() dir = %q, want %q", got.Dir, workspaceDir)
+	}
+
+	status := runGit(t, ctx, workspaceDir, "status", "--porcelain")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected clean workspace after fallback remount, got:\n%s", status)
+	}
+	if got := readFile(t, filepath.Join(workspaceDir, "conflict.txt")); got != testWorkspaceBranchContent {
+		t.Fatalf("conflict.txt mismatch after fallback remount: got %q", got)
+	}
+}
+
+func TestEnsureWorkspace_RemountsCleanBranchWithoutSyncWhenFreshMountConflicts(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workingDir := t.TempDir()
+	initGitRepo(t, ctx, workingDir)
+
+	writeFile(t, filepath.Join(workingDir, "conflict.txt"), "base\n")
+	runGit(t, ctx, workingDir, "add", "conflict.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: seed")
+
+	sessionID := "tg-10-10"
+	branchName := "norma/relay/tg-10-10"
+	workspaceDir := filepath.Join(t.TempDir(), "relay-workspace")
+	runGit(t, ctx, workingDir, "worktree", "add", "-b", branchName, workspaceDir, "HEAD")
+
+	writeFile(t, filepath.Join(workspaceDir, "conflict.txt"), testWorkspaceBranchContent)
+	runGit(t, ctx, workspaceDir, "add", "conflict.txt")
+	runGit(t, ctx, workspaceDir, "commit", "-m", "feat: branch conflict")
+
+	if err := runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir); err != nil {
+		t.Fatalf("remove worktree: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
+	})
+
+	writeFile(t, filepath.Join(workingDir, "conflict.txt"), "main\n")
+	runGit(t, ctx, workingDir, "add", "conflict.txt")
+	runGit(t, ctx, workingDir, "commit", "-m", "chore: main conflict")
+
+	m := NewWorkspaceManager(workingDir, t.TempDir(), currentBranch(t, ctx, workingDir))
+	got, err := m.EnsureWorkspace(ctx, sessionID, branchName, workspaceDir)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	if !got.SyncSkipped {
+		t.Fatal("EnsureWorkspace() SyncSkipped = false, want true")
+	}
+
+	status := runGit(t, ctx, workspaceDir, "status", "--porcelain")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected clean workspace after fallback remount, got:\n%s", status)
+	}
+	if got := readFile(t, filepath.Join(workspaceDir, "conflict.txt")); got != testWorkspaceBranchContent {
+		t.Fatalf("conflict.txt mismatch after fallback remount: got %q", got)
 	}
 }
 
@@ -189,7 +289,7 @@ func TestWorkspaceImportAbortsRebaseOnConflict(t *testing.T) {
 		_ = runGitAllowError(ctx, workingDir, "worktree", "remove", "--force", workspaceDir)
 	})
 
-	writeFile(t, filepath.Join(workspaceDir, "conflict.txt"), "branch\n")
+	writeFile(t, filepath.Join(workspaceDir, "conflict.txt"), testWorkspaceBranchContent)
 	runGit(t, ctx, workspaceDir, "add", "conflict.txt")
 	runGit(t, ctx, workspaceDir, "commit", "-m", "feat: branch conflict")
 
@@ -220,7 +320,7 @@ func TestWorkspaceImportAbortsRebaseOnConflict(t *testing.T) {
 	if strings.TrimSpace(status) != "" {
 		t.Fatalf("expected clean workspace after abort, got:\n%s", status)
 	}
-	if got := readFile(t, filepath.Join(workspaceDir, "conflict.txt")); got != "branch\n" {
+	if got := readFile(t, filepath.Join(workspaceDir, "conflict.txt")); got != testWorkspaceBranchContent {
 		t.Fatalf("conflict.txt mismatch after abort: got %q", got)
 	}
 }

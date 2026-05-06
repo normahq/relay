@@ -304,6 +304,8 @@ Relay runs with a single provider per process (`relay.provider`).
 
 - Relay restores persisted session metadata on first message after restart.
 - Persisted session label is reused as-is for restore; if missing, relay falls back to label `auto`.
+- In workspace mode, restore first tries to sync the session branch with the configured base branch.
+- If that sync conflicts, relay recreates a clean worktree on the persisted session branch, restores the session anyway, and sends a short warning that `relay.workspace.import` can retry the sync later.
 - If no persisted session metadata exists, relay creates a new regular session using label `auto`.
 - Public-channel welcome banners always display `Name: relay` to keep app identity stable, even when the internal persisted session label differs.
 - Welcome message uses a user-friendly MarkdownV2 format:
@@ -315,6 +317,7 @@ Relay runs with a single provider per process (`relay.provider`).
 - `relay.workspace.import`
   - rebases the session workspace onto the configured base branch
   - works for active or persisted sessions as long as workspace metadata exists in `relay.db`
+  - is the explicit retry path when restart restore skipped base sync because of a conflict
 - `relay.workspace.export`
   - squash-merges the session workspace branch into the configured base branch with the provided Conventional Commit message
   - also works for persisted sessions before lazy restore

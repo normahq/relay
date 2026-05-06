@@ -17,7 +17,7 @@ func MountWorktree(ctx context.Context, workingDir, workspaceDir, branchName, ba
 	}
 
 	// Check if branch already exists
-	branchExists := branchExists(ctx, workingDir, branchName)
+	branchExists := BranchExists(ctx, workingDir, branchName)
 
 	args := []string{"worktree", "add", "-b", branchName, workspaceDir}
 	if branchExists {
@@ -34,18 +34,11 @@ func MountWorktree(ctx context.Context, workingDir, workspaceDir, branchName, ba
 		return "", fmt.Errorf("git worktree add: %w", err)
 	}
 
-	// Sync branch with base: merge base into existing branch to pick up new changes
-	if baseBranch != "" && branchName != baseBranch {
-		if err := GitRunCmdErr(ctx, workspaceDir, "git", "merge", "--no-edit", baseBranch); err != nil {
-			_ = GitRunCmdErr(ctx, workingDir, "git", "worktree", "remove", "--force", workspaceDir)
-			return "", fmt.Errorf("git merge %s into %s: %w", baseBranch, branchName, err)
-		}
-	}
-
 	return workspaceDir, nil
 }
 
-func branchExists(ctx context.Context, workingDir, branchName string) bool {
+// BranchExists reports whether the given local branch exists in the repository.
+func BranchExists(ctx context.Context, workingDir, branchName string) bool {
 	return GitRunCmdErr(ctx, workingDir, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName) == nil
 }
 

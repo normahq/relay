@@ -18,6 +18,13 @@ type WorkspaceManager struct {
 	baseBranch    string
 }
 
+// EnsureWorkspaceResult describes the mounted workspace and whether restore
+// had to skip base-branch sync after an auto-sync failure.
+type EnsureWorkspaceResult struct {
+	Dir         string
+	SyncSkipped bool
+}
+
 // NewWorkspaceManager creates a WorkspaceManager for the given working directory.
 func NewWorkspaceManager(workingDir, stateDir, baseBranch string) *WorkspaceManager {
 	return &WorkspaceManager{
@@ -28,38 +35,57 @@ func NewWorkspaceManager(workingDir, stateDir, baseBranch string) *WorkspaceMana
 }
 
 // EnsureWorkspace creates or returns an existing workspace directory.
-// If existingPath is non-empty and the directory exists, it is reused and synced with base.
-// Otherwise a new worktree is mounted at workspacesDir/<key> using branch <branchName>.
-func (m *WorkspaceManager) EnsureWorkspace(ctx context.Context, key, branchName, existingPath string) (string, error) {
+// If an existing session branch is available, relay attempts to sync it to base.
+// When that sync fails, relay recreates a clean worktree on the session branch
+// and continues without syncing base so restart can still succeed.
+func (m *WorkspaceManager) EnsureWorkspace(ctx context.Context, key, branchName, existingPath string) (EnsureWorkspaceResult, error) {
+	result := EnsureWorkspaceResult{}
 	if err := os.MkdirAll(m.workspacesDir, 0o755); err != nil {
-		return "", fmt.Errorf("create workspaces dir: %w", err)
+		return result, fmt.Errorf("create workspaces dir: %w", err)
 	}
 
 	workspaceDir := existingPath
 	if strings.TrimSpace(workspaceDir) == "" {
 		workspaceDir = filepath.Join(m.workspacesDir, key)
 	}
+	result.Dir = workspaceDir
+
+	branchName = strings.TrimSpace(branchName)
+	branchExists := branchName != "" && git.BranchExists(ctx, m.workingDir, branchName)
 
 	if fi, err := os.Stat(workspaceDir); err == nil && fi.IsDir() {
-		// Workspace already exists — import latest base
-		if err := m.Import(ctx, workspaceDir); err != nil {
-			return "", fmt.Errorf("import base: %w", err)
+		if branchExists {
+			// Workspace already exists — import latest base when we are resuming an existing branch.
+			if err := m.Import(ctx, workspaceDir); err != nil {
+				return m.recreateWorkspaceWithoutSync(ctx, workspaceDir, branchName, err)
+			}
 		}
-		return workspaceDir, nil
+		return result, nil
 	} else if err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("stat workspace dir %q: %w", workspaceDir, err)
+		return result, fmt.Errorf("stat workspace dir %q: %w", workspaceDir, err)
 	}
 
-	baseBranch, err := m.resolvedBaseBranch(ctx)
-	if err != nil {
-		return "", err
+	baseBranch := ""
+	if !branchExists {
+		var err error
+		baseBranch, err = m.resolvedBaseBranch(ctx)
+		if err != nil {
+			return result, err
+		}
 	}
 
 	if _, err := git.MountWorktree(ctx, m.workingDir, workspaceDir, branchName, baseBranch); err != nil {
-		return "", fmt.Errorf("mount worktree: %w", err)
+		return result, fmt.Errorf("mount worktree: %w", err)
 	}
 
-	return workspaceDir, nil
+	if !branchExists {
+		return result, nil
+	}
+	if err := m.Import(ctx, workspaceDir); err != nil {
+		return m.recreateWorkspaceWithoutSync(ctx, workspaceDir, branchName, err)
+	}
+
+	return result, nil
 }
 
 // Import syncs a workspace branch onto the configured base branch.
@@ -197,4 +223,27 @@ func (m *WorkspaceManager) CleanupWorkspace(ctx context.Context, workspaceDir st
 		return err
 	}
 	return nil
+}
+
+func (m *WorkspaceManager) recreateWorkspaceWithoutSync(ctx context.Context, workspaceDir, branchName string, syncErr error) (EnsureWorkspaceResult, error) {
+	result := EnsureWorkspaceResult{Dir: workspaceDir}
+	if strings.TrimSpace(branchName) == "" {
+		return result, fmt.Errorf("sync workspace to base: %w", syncErr)
+	}
+
+	log.Warn().
+		Err(syncErr).
+		Str("workspace", workspaceDir).
+		Str("branch", branchName).
+		Msg("workspace sync failed; recreating worktree without sync")
+
+	if err := git.RemoveWorktree(ctx, m.workingDir, workspaceDir); err != nil {
+		return result, fmt.Errorf("cleanup conflicted workspace: %w", err)
+	}
+	if _, err := git.MountWorktree(ctx, m.workingDir, workspaceDir, branchName, ""); err != nil {
+		return result, fmt.Errorf("remount workspace without sync: %w", err)
+	}
+
+	result.SyncSkipped = true
+	return result, nil
 }

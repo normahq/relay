@@ -11,6 +11,7 @@ import (
 
 	relayagent "github.com/normahq/relay/internal/apps/relay/agent"
 	relaystate "github.com/normahq/relay/internal/apps/relay/state"
+	"github.com/normahq/relay/internal/git"
 	"github.com/rs/zerolog"
 	"go.uber.org/fx"
 	adksession "google.golang.org/adk/session"
@@ -19,6 +20,8 @@ import (
 const cleanupTimeout = 10 * time.Second
 
 const sessionStatusPersisted = "persisted"
+
+const workspaceSyncSkippedNotice = "Workspace was restored without syncing the latest base changes because auto-sync conflicted. Use relay.workspace.import to retry later."
 
 var ErrNoPersistedSession = errors.New("no persisted session")
 
@@ -170,6 +173,10 @@ func (m *Manager) RelayProviderID() string {
 
 // CreateSession builds an agent for the given locator and stores it in memory.
 func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, agentName string) error {
+	return m.createSession(ctx, sessionCtx, agentName, nil)
+}
+
+func (m *Manager) createSession(ctx context.Context, sessionCtx SessionContext, agentName string, persisted *relaystate.SessionRecord) error {
 	locator := sessionCtx.Locator
 	userID := strings.TrimSpace(sessionCtx.UserID)
 	if userID == "" {
@@ -213,12 +220,28 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 
 	branchName := ""
 	workspaceDir := m.workingDir
+	startupNotice := ""
 	if m.workspaceEnabled {
 		branchName = m.SessionBranchName(sessionID)
-		workspaceDir, err = m.workspaces.EnsureWorkspace(ctx, sessionID, branchName, "")
+		existingPath := ""
+		if persisted != nil {
+			if persistedBranch := strings.TrimSpace(persisted.BranchName); persistedBranch != "" {
+				branchName = persistedBranch
+				if !git.BranchExists(ctx, m.workingDir, branchName) {
+					return fmt.Errorf("persisted workspace branch %q not found", branchName)
+				}
+			}
+			existingPath = strings.TrimSpace(persisted.WorkspaceDir)
+		}
+
+		workspace, err := m.workspaces.EnsureWorkspace(ctx, sessionID, branchName, existingPath)
 		if err != nil {
 			m.logger.Error().Err(err).Str("session_id", sessionID).Msg("failed to create workspace")
 			return fmt.Errorf("create workspace: %w", err)
+		}
+		workspaceDir = workspace.Dir
+		if workspace.SyncSkipped {
+			startupNotice = workspaceSyncSkippedNotice
 		}
 		m.logger.Debug().Str("session_id", sessionID).Str("workspace", workspaceDir).Msg("workspace created")
 	}
@@ -280,6 +303,7 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		chatID:         chatID,
 		workspaceDir:   workspaceDir,
 		branchName:     branchName,
+		startupNotice:  startupNotice,
 	}
 
 	if err := m.persistSessionRecord(ctx, ts, relaystate.SessionStatusActive); err != nil {
@@ -303,6 +327,26 @@ func (m *Manager) CreateSession(ctx context.Context, sessionCtx SessionContext, 
 		Msg("session created successfully")
 
 	return nil
+}
+
+// TakeStartupNotice returns and clears the pending session startup notice.
+func (m *Manager) TakeStartupNotice(sessionID string) string {
+	trimmedID := strings.TrimSpace(sessionID)
+	if trimmedID == "" {
+		return ""
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ts := m.sessions[trimmedID]
+	if ts == nil {
+		return ""
+	}
+
+	notice := strings.TrimSpace(ts.startupNotice)
+	ts.startupNotice = ""
+	return notice
 }
 
 // StopSession removes a session from memory and cleans up.
