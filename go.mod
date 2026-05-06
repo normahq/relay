@@ -4,12 +4,12 @@ go 1.25.9
 
 require (
 	github.com/Mad-Pixels/goldmark-tgmd v0.0.10
-	github.com/coder/acp-go-sdk v0.12.0
+	github.com/coder/acp-go-sdk v0.12.2
 	github.com/ipfans/fxlogger v0.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/metalagman/appkit v0.1.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
-	github.com/normahq/runtime v0.0.1
+	github.com/normahq/runtime v0.0.2
 	github.com/pressly/goose/v3 v3.16.0
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
@@ -19,7 +19,7 @@ require (
 	github.com/tgbotkit/runtime v0.0.0-20260326045117-da01e4eaebb0
 	go.uber.org/fx v1.24.0
 	google.golang.org/adk v1.2.0
-	google.golang.org/genai v1.54.0
+	google.golang.org/genai v1.56.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.27.0
 )

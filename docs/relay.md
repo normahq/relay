@@ -206,6 +206,10 @@ The relay MCP server (`relay`) is automatically included in all sessions when wo
   - `none` omits Telegram `parse_mode` and sends raw text
   - invalid values fail startup
   - see [Telegram Message Formatting](telegram-formatting.md) for supported tags, unsupported tags, and escaping behavior
+- `relay.telegram.plan_updates`: surface ACP plan snapshots in relay progress (default: `true`)
+  - `true`: DM chats replace generic thinking drafts with plan snapshots when the provider emits plan updates
+  - `true`: public chats/topics send a plain-text message for each distinct plan snapshot
+  - `false`: relay keeps legacy progress behavior (`typing` plus DM `Thinking...` drafts)
 - `relay.telegram.webhook.enabled`: enable local HTTP webhook endpoint (`true` => webhook mode, `false` => polling mode; default: `false`)
 - `relay.telegram.webhook.url`: outgoing Telegram webhook URL (required when `relay.telegram.webhook.enabled=true`)
 - `relay.telegram.webhook.auth_token`: optional webhook auth token
@@ -272,6 +276,7 @@ Relay lazy-restores regular sessions on first message after restart when metadat
 Per model turn:
 
 1. Non-terminal ADK events send throttled `sendChatAction` with `typing` for the same chat/topic; DM chats also emit throttled plain `sendMessageDraft` thinking placeholders using a stable `draft_id`.
+   When `relay.telegram.plan_updates=true`, ACP plan snapshots replace generic DM thinking drafts and are sent as plain-text progress messages in public chats/topics.
 2. Final assistant text is sent with `sendMessage` using `relay.telegram.formatting_mode`:
    - `markdownv2`: model writes Markdown/plain text; Relay converts it to Telegram MarkdownV2 and sends with `parse_mode=MarkdownV2`.
    - `html`: model writes Telegram HTML; Relay escapes unsafe raw text, preserves supported Telegram HTML tags, and sends with `parse_mode=HTML`.

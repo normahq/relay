@@ -21,6 +21,7 @@ const testRelayDefaultProfile = "default"
 func TestLoadConfigDocument_AppliesProfileRelayOverrides(t *testing.T) {
 	workingDir := t.TempDir()
 	t.Setenv("RELAY_TELEGRAM_WEBHOOK_ENABLED", "true")
+	t.Setenv("RELAY_TELEGRAM_PLAN_UPDATES", "true")
 
 	if err := writeFile(filepath.Join(workingDir, ".config", "relay", "config.yaml"), `runtime:
   providers:
@@ -33,6 +34,9 @@ profiles:
     relay:
       provider: relay_agent
       global_instruction: from profile
+relay:
+  telegram:
+    plan_updates: false
 `); err != nil {
 		t.Fatalf("write relay config: %v", err)
 	}
@@ -64,6 +68,9 @@ profiles:
 	}
 	if !relayCfg.Relay.Telegram.Webhook.Enabled {
 		t.Fatal("webhook.enabled = false, want true from env override")
+	}
+	if !relayCfg.Relay.Telegram.PlanUpdates {
+		t.Fatal("plan_updates = false, want true from env override")
 	}
 }
 

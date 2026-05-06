@@ -216,6 +216,14 @@ func Module(
 		),
 		fx.Provide(
 			fx.Annotate(
+				func() bool {
+					return cfg.Relay.Telegram.PlanUpdates
+				},
+				fx.ResultTags(`name:"relay_telegram_plan_updates"`),
+			),
+		),
+		fx.Provide(
+			fx.Annotate(
 				func() string { return strings.TrimSpace(ownerToken) },
 				fx.ResultTags(`name:"relay_auth_token"`),
 			),

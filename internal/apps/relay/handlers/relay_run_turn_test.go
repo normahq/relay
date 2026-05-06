@@ -23,6 +23,8 @@ import (
 const (
 	relayRunTurnGenericEmptyTerminalMessage = "The provider ended the turn without a usable reply. Please try again."
 	relayRunTurnFinalAnswerText             = "final answer"
+	relayRunTurnThinkingOne                 = "Thinking."
+	relayRunTurnThinkingTwo                 = "Thinking.."
 )
 
 type relayRunTurnTelegramClient struct {
@@ -86,6 +88,55 @@ func (c *relayRunTurnTelegramClient) SendChatActionWithResponse(
 	}, nil
 }
 
+func newRelayPlanSnapshot(entries ...map[string]any) map[string]any {
+	return map[string]any{
+		"entries": entries,
+	}
+}
+
+func TestRunTurn_SendsPlanUpdateDraftFromCustomMetadataInDM(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, false)
+	h.planUpdatesEnabled = true
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		plan := adksession.NewEvent(invocationID)
+		plan.Partial = true
+		plan.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan": newRelayPlanSnapshot(
+				map[string]any{"content": "Run tests", "status": "in_progress", "priority": "medium"},
+				map[string]any{"content": "Ship fix", "status": "pending", "priority": "high"},
+			),
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{plan, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true, Thinking: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.drafts) != 1 {
+		t.Fatalf("draft calls = %d, want 1", len(tgClient.drafts))
+	}
+	if got := tgClient.drafts[0].Text; got != "Plan update\n- [in progress] Run tests\n- [pending] Ship fix" {
+		t.Fatalf("draft[0].text = %q, want plan update text", got)
+	}
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != relayRunTurnFinalAnswerText {
+		t.Fatalf("message text = %q, want final answer", got)
+	}
+}
+
 func TestRunTurn_SendsProgressForNonTerminalEventsInDM(t *testing.T) {
 	t.Parallel()
 
@@ -111,8 +162,8 @@ func TestRunTurn_SendsProgressForNonTerminalEventsInDM(t *testing.T) {
 	if len(tgClient.drafts) != 1 {
 		t.Fatalf("draft calls = %d, want 1", len(tgClient.drafts))
 	}
-	if got := tgClient.drafts[0].Text; got != "Thinking." {
-		t.Fatalf("draft[0].text = %q, want Thinking.", got)
+	if got := tgClient.drafts[0].Text; got != relayRunTurnThinkingOne {
+		t.Fatalf("draft[0].text = %q, want %s", got, relayRunTurnThinkingOne)
 	}
 	for i, draft := range tgClient.drafts {
 		if draft.MessageThreadId == nil || *draft.MessageThreadId != 77 {
@@ -213,6 +264,62 @@ func TestRunTurn_SendsTypingWithoutThinkingDraftInPublicChat(t *testing.T) {
 		if action.Action != "typing" {
 			t.Fatalf("chatActions[%d].action = %q, want typing", i, action.Action)
 		}
+	}
+}
+
+func TestRunTurn_SendsPlanUpdateMessagesInPublicChat(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, true)
+	h.planUpdatesEnabled = true
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		planOne := adksession.NewEvent(invocationID)
+		planOne.Partial = true
+		planOne.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan":        newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "pending"}),
+		}
+
+		planTwo := adksession.NewEvent(invocationID)
+		planTwo.Partial = true
+		planTwo.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan": newRelayPlanSnapshot(
+				map[string]any{"content": "Run tests", "status": "completed"},
+				map[string]any{"content": "Ship fix", "status": "in_progress"},
+			),
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{planOne, planTwo, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.drafts) != 0 {
+		t.Fatalf("draft calls = %d, want 0", len(tgClient.drafts))
+	}
+	if len(tgClient.messages) != 3 {
+		t.Fatalf("message calls = %d, want 3", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != "Plan update\n- [pending] Run tests" {
+		t.Fatalf("messages[0].text = %q, want first plan update", got)
+	}
+	if got := tgClient.messages[1].Text; got != "Plan update\n- [completed] Run tests\n- [in progress] Ship fix" {
+		t.Fatalf("messages[1].text = %q, want second plan update", got)
+	}
+	if got := tgClient.messages[2].Text; got != relayRunTurnFinalAnswerText {
+		t.Fatalf("messages[2].text = %q, want final answer", got)
+	}
+	if tgClient.messages[0].ParseMode != nil || tgClient.messages[1].ParseMode != nil {
+		t.Fatal("plan update messages must be plain text without parse_mode")
 	}
 }
 
@@ -355,14 +462,90 @@ func TestRunTurn_SendsThinkingDraftAgainAfterThrottleInterval(t *testing.T) {
 	if len(tgClient.drafts) != 2 {
 		t.Fatalf("draft calls = %d, want 2", len(tgClient.drafts))
 	}
-	if got := tgClient.drafts[0].Text; got != "Thinking." {
-		t.Fatalf("draft[0].text = %q, want Thinking.", got)
+	if got := tgClient.drafts[0].Text; got != relayRunTurnThinkingOne {
+		t.Fatalf("draft[0].text = %q, want %s", got, relayRunTurnThinkingOne)
 	}
-	if got := tgClient.drafts[1].Text; got != "Thinking.." {
-		t.Fatalf("draft[1].text = %q, want Thinking..", got)
+	if got := tgClient.drafts[1].Text; got != relayRunTurnThinkingTwo {
+		t.Fatalf("draft[1].text = %q, want %s", got, relayRunTurnThinkingTwo)
 	}
 	if timeIdx != len(times) {
 		t.Fatalf("clock calls = %d, want %d", timeIdx, len(times))
+	}
+}
+
+func TestRunTurn_DoesNotFallBackToThinkingAfterPlanDraftInDM(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &relayRunTurnTelegramClient{}
+	msg := messenger.NewMessenger(tgClient, zerolog.Nop())
+	channel := relaytelegram.NewAdapter(relaytelegram.AdapterParams{
+		Messenger: msg,
+		TGClient:  tgClient,
+		Logger:    zerolog.Nop(),
+	})
+	baseTime := time.Date(2026, 4, 24, 20, 0, 0, 0, time.UTC)
+	times := []time.Time{
+		baseTime,
+		baseTime.Add(telegramProgressThrottleInterval),
+		baseTime.Add(2 * telegramProgressThrottleInterval),
+	}
+	timeIdx := 0
+	h := &RelayHandler{
+		channel:            channel,
+		logger:             zerolog.Nop(),
+		planUpdatesEnabled: true,
+		now: func() time.Time {
+			if timeIdx >= len(times) {
+				return times[len(times)-1]
+			}
+			now := times[timeIdx]
+			timeIdx++
+			return now
+		},
+	}
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		thought := adksession.NewEvent(invocationID)
+		thought.Partial = true
+		thought.Content = &genai.Content{
+			Role:  genai.RoleModel,
+			Parts: []*genai.Part{{Thought: true}},
+		}
+
+		plan := adksession.NewEvent(invocationID)
+		plan.Partial = true
+		plan.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan":        newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "in_progress"}),
+		}
+
+		thoughtTwo := adksession.NewEvent(invocationID)
+		thoughtTwo.Partial = true
+		thoughtTwo.Content = &genai.Content{
+			Role:  genai.RoleModel,
+			Parts: []*genai.Part{{Thought: true}},
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{thought, plan, thoughtTwo, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Thinking: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.drafts) != 2 {
+		t.Fatalf("draft calls = %d, want 2", len(tgClient.drafts))
+	}
+	if got := tgClient.drafts[0].Text; got != relayRunTurnThinkingOne {
+		t.Fatalf("draft[0].text = %q, want %s", got, relayRunTurnThinkingOne)
+	}
+	if got := tgClient.drafts[1].Text; got != "Plan update\n- [in progress] Run tests" {
+		t.Fatalf("draft[1].text = %q, want plan update text", got)
 	}
 }
 
@@ -699,6 +882,112 @@ func TestRunTurn_SendsFinalTextFromTurnCompleteEvent(t *testing.T) {
 	}
 	if got := tgClient.messages[0].Text; got != relayRunTurnFinalAnswerText {
 		t.Fatalf("message text = %q, want final answer", got)
+	}
+}
+
+func TestRunTurn_UsesLegacyPlanStateDeltaFallback(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, true)
+	h.planUpdatesEnabled = true
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		plan := adksession.NewEvent(invocationID)
+		plan.Partial = true
+		plan.Actions.StateDelta["acp_plan"] = newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "pending"})
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{plan, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 2 {
+		t.Fatalf("message calls = %d, want 2", len(tgClient.messages))
+	}
+	if got := tgClient.messages[0].Text; got != "Plan update\n- [pending] Run tests" {
+		t.Fatalf("messages[0].text = %q, want legacy plan update", got)
+	}
+}
+
+func TestRunTurn_DeduplicatesRepeatedPlanUpdates(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, true)
+	h.planUpdatesEnabled = true
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		planOne := adksession.NewEvent(invocationID)
+		planOne.Partial = true
+		planOne.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan":        newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "pending"}),
+		}
+
+		planTwo := adksession.NewEvent(invocationID)
+		planTwo.Partial = true
+		planTwo.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan":        newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "pending"}),
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{planOne, planTwo, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Typing: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 2 {
+		t.Fatalf("message calls = %d, want 2", len(tgClient.messages))
+	}
+}
+
+func TestRunTurn_PlanUpdatesDisabledKeepsLegacyThinkingBehavior(t *testing.T) {
+	t.Parallel()
+
+	h, tgClient := newRelayRunTurnTestHandler(t, true)
+	h.planUpdatesEnabled = false
+
+	adkRunner, sessionID := newRelayRunTurnTestRunnerWithEvents(t, func(invocationID string) []*adksession.Event {
+		plan := adksession.NewEvent(invocationID)
+		plan.Partial = true
+		plan.CustomMetadata = map[string]any{
+			"acp_update_kind": "plan",
+			"acp_plan":        newRelayPlanSnapshot(map[string]any{"content": "Run tests", "status": "pending"}),
+		}
+
+		done := adksession.NewEvent(invocationID)
+		done.Content = genai.NewContentFromText(relayRunTurnFinalAnswerText, genai.RoleModel)
+		done.TurnComplete = true
+
+		return []*adksession.Event{plan, done}
+	})
+	locator := relaysession.NewTelegramSessionLocator(9001, 77)
+	progressPolicy := relaychannel.ProgressPolicy{Thinking: true}
+	if err := h.runTurn(context.Background(), "hello", adkRunner, "tg-101", sessionID, sessionID, locator, 41, progressPolicy); err != nil {
+		t.Fatalf("runTurn() error = %v", err)
+	}
+
+	if len(tgClient.drafts) != 1 {
+		t.Fatalf("draft calls = %d, want 1", len(tgClient.drafts))
+	}
+	if got := tgClient.drafts[0].Text; got != relayRunTurnThinkingOne {
+		t.Fatalf("draft[0].text = %q, want %s", got, relayRunTurnThinkingOne)
+	}
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
 	}
 }
 

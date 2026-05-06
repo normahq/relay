@@ -60,6 +60,7 @@ func TestReadmeDocumentsRelayConfigShapeAndMCPServers(t *testing.T) {
 		"mcp_servers:",
 		"generic_acp | gemini_acp | codex_acp | opencode_acp | copilot_acp | claude_code_acp | pool",
 		"webhook:",
+		"plan_updates:",
 		"logger:",
 		"working_dir:",
 		"state_dir:",

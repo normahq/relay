@@ -52,17 +52,18 @@ func (a *relayAuthorizer) IsCollaborator(userID int64) bool {
 
 // RelayHandler handles bidirectional message relay between owner and agent.
 type RelayHandler struct {
-	ownerStore        *auth.OwnerStore
-	collaboratorStore *auth.CollaboratorStore
-	channel           *relaytelegram.Adapter
-	sessionManager    *relaysession.Manager
-	turnDispatcher    turnQueue
-	messenger         *messenger.Messenger
-	tgClient          client.ClientWithResponsesInterface
-	authToken         string
-	relayProviderName string
-	logger            zerolog.Logger
-	authorizer        auth.Authorizer
+	ownerStore         *auth.OwnerStore
+	collaboratorStore  *auth.CollaboratorStore
+	channel            *relaytelegram.Adapter
+	sessionManager     *relaysession.Manager
+	turnDispatcher     turnQueue
+	messenger          *messenger.Messenger
+	tgClient           client.ClientWithResponsesInterface
+	authToken          string
+	relayProviderName  string
+	planUpdatesEnabled bool
+	logger             zerolog.Logger
+	authorizer         auth.Authorizer
 
 	mu          sync.RWMutex
 	ownerID     int64
@@ -85,22 +86,24 @@ type relayHandlerDeps struct {
 	TGClient           client.ClientWithResponsesInterface
 	AuthToken          string `name:"relay_auth_token"`
 	RelayProviderID    string `name:"relay_provider"`
+	PlanUpdatesEnabled bool   `name:"relay_telegram_plan_updates"`
 	Logger             zerolog.Logger
 	InternalMCPManager *InternalMCPManager `optional:"true"`
 }
 
 func NewRelayHandler(deps relayHandlerDeps) (*RelayHandler, error) {
 	h := &RelayHandler{
-		ownerStore:        deps.OwnerStore,
-		collaboratorStore: deps.CollaboratorStore,
-		channel:           deps.Channel,
-		sessionManager:    deps.SessionManager,
-		turnDispatcher:    deps.TurnDispatcher,
-		messenger:         deps.Messenger,
-		tgClient:          deps.TGClient,
-		authToken:         strings.TrimSpace(deps.AuthToken),
-		relayProviderName: strings.TrimSpace(deps.RelayProviderID),
-		logger:            deps.Logger.With().Str("component", "relay.handler").Logger(),
+		ownerStore:         deps.OwnerStore,
+		collaboratorStore:  deps.CollaboratorStore,
+		channel:            deps.Channel,
+		sessionManager:     deps.SessionManager,
+		turnDispatcher:     deps.TurnDispatcher,
+		messenger:          deps.Messenger,
+		tgClient:           deps.TGClient,
+		authToken:          strings.TrimSpace(deps.AuthToken),
+		relayProviderName:  strings.TrimSpace(deps.RelayProviderID),
+		planUpdatesEnabled: deps.PlanUpdatesEnabled,
+		logger:             deps.Logger.With().Str("component", "relay.handler").Logger(),
 	}
 	h.authorizer = &relayAuthorizer{ownerStore: deps.OwnerStore, collaboratorStore: deps.CollaboratorStore}
 
@@ -466,6 +469,8 @@ func (h *RelayHandler) runTurn(
 	thinkingIdx := 0
 	typingThrottle := throttle.New(telegramProgressThrottleInterval, throttle.WithClock(h.currentTime))
 	thinkingThrottle := throttle.New(telegramProgressThrottleInterval, throttle.WithClock(h.currentTime))
+	lastPlanProgressText := ""
+	planDraftActive := false
 
 	for ev, err := range r.Run(runCtx, userID, agentSessionID, userContent, agent.RunConfig{}) {
 		if err != nil {
@@ -483,6 +488,11 @@ func (h *RelayHandler) runTurn(
 		if errorMessage := strings.TrimSpace(ev.ErrorMessage); errorMessage != "" {
 			terminalErrorMessage = errorMessage
 		}
+		planProgressText := ""
+		hasPlanUpdate := false
+		if h.planUpdatesEnabled {
+			planProgressText, hasPlanUpdate = relayPlanProgressText(ev)
+		}
 		if !ev.TurnComplete {
 			if progressPolicy.Typing {
 				typingThrottle.Do(func() {
@@ -491,7 +501,24 @@ func (h *RelayHandler) runTurn(
 					}
 				})
 			}
-			if progressPolicy.Thinking {
+			if hasPlanUpdate && planProgressText != "" && planProgressText != lastPlanProgressText {
+				switch {
+				case progressPolicy.Thinking:
+					if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, planProgressText); sendErr != nil {
+						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send plan update draft")
+					} else {
+						lastPlanProgressText = planProgressText
+						planDraftActive = true
+					}
+				default:
+					if sendErr := h.channel.SendPlain(ctx, locator, planProgressText); sendErr != nil {
+						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send plan update message")
+					} else {
+						lastPlanProgressText = planProgressText
+					}
+				}
+			}
+			if progressPolicy.Thinking && !planDraftActive {
 				thinkingThrottle.Do(func() {
 					if sendErr := h.channel.SendDraftPlain(ctx, locator, draftID, thinkingStages[thinkingIdx%len(thinkingStages)]); sendErr != nil {
 						log.Warn().Err(sendErr).Int("topic_id", topicID).Msg("failed to send thinking draft")
@@ -578,8 +605,11 @@ func (h *RelayHandler) runTurn(
 			Str("error_code", strings.TrimSpace(ev.ErrorCode)).
 			Bool("has_error_message", strings.TrimSpace(ev.ErrorMessage) != "").
 			Interface("finish_reason", ev.FinishReason).
+			Int("custom_metadata_count", len(ev.CustomMetadata)).
 			Int("long_running_tool_ids_count", len(ev.LongRunningToolIDs)).
 			Int("state_delta_count", len(ev.Actions.StateDelta)).
+			Bool("has_plan_update", hasPlanUpdate).
+			Int("plan_progress_char_count", len(planProgressText)).
 			Int("artifact_delta_count", len(ev.Actions.ArtifactDelta)).
 			Int("requested_tool_confirmations_count", len(ev.Actions.RequestedToolConfirmations)).
 			Bool("skip_summarization", ev.Actions.SkipSummarization).

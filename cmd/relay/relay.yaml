@@ -15,6 +15,10 @@ relay:
     # - html: model writes Telegram HTML; relay sends with Telegram HTML parse mode
     # - none: relay sends plain text without parse_mode
     formatting_mode: "markdownv2"
+    # Surface ACP plan updates in relay progress.
+    # - true: DM drafts show plan snapshots; public chats/topics receive plain-text plan messages
+    # - false: keep legacy typing / Thinking... progress only
+    plan_updates: true
 
     # Optional webhook configuration
     webhook:

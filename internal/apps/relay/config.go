@@ -21,6 +21,7 @@ type RelayConfig struct {
 type TelegramConfig struct {
 	Token          string        `mapstructure:"token"`
 	FormattingMode string        `mapstructure:"formatting_mode"`
+	PlanUpdates    bool          `mapstructure:"plan_updates"`
 	Webhook        WebhookConfig `mapstructure:"webhook"`
 }
 

@@ -127,6 +127,9 @@ relay:
     # Final assistant response mode: markdownv2 | html | none.
     formatting_mode: "markdownv2" # markdownv2 | html | none
 
+    # Surface ACP plan updates in Telegram progress.
+    plan_updates: true
+
     webhook:
       enabled: false
       url: ""
@@ -230,6 +233,8 @@ The built-in `relay` MCP server is always reserved for Relay’s own tools. Do n
   - set `relay.provider` to a value from `runtime.providers`
 - workspace import/export issues:
   - verify `relay.workspace.mode` and `relay.workspace.base_branch`
+- plan updates are too noisy:
+  - set `relay.telegram.plan_updates` to `false` to keep only typing / `Thinking...` progress
   - when `mode: on`, run relay in a Git repository
 
 ## Documentation
