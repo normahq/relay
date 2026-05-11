@@ -53,16 +53,32 @@ workspace.
 Example `Dockerfile`:
 
 ```dockerfile
-FROM node:lts-bookworm-slim
+FROM node:lts-bookworm
 
-RUN npm install -g @normahq/relay
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @normahq/relay \
+ && npm cache clean --force
 
 # Install the provider CLI used by relay.provider here, for example Codex,
 # Gemini, Claude Code, opencode, or another ACP-compatible command.
 
+RUN node --version && npm --version && npx --version && git --version
+
 WORKDIR /workspace
 ENTRYPOINT ["relay"]
 ```
+
+`node:lts-bookworm` is intentionally used instead of `node:lts-bookworm-slim`.
+Relay is distributed through npm, MCP examples commonly use `npx`, and Git
+workspace mode shells out to `git`. If you need fully repeatable builds, pin a
+concrete supported Bookworm tag such as `node:24-bookworm`.
 
 Example `compose.yaml`:
 

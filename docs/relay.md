@@ -126,6 +126,32 @@ project directory used by a host install.
 
 Use a bind mount for the current directory:
 
+Example image wrapper:
+
+```dockerfile
+FROM node:lts-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @normahq/relay \
+ && npm cache clean --force
+
+# Install the provider CLI used by relay.provider here.
+
+RUN node --version && npm --version && npx --version && git --version
+
+WORKDIR /workspace
+ENTRYPOINT ["relay"]
+```
+
+Use the image with a current-directory bind mount:
+
 ```yaml
 services:
   relay:
@@ -152,7 +178,11 @@ exists, but should not be required for the first `docker compose run --rm relay 
 The container image must include Relay and the provider command referenced by
 `relay.provider`. For example, if the selected provider launches Codex, Gemini,
 Claude Code, opencode, Copilot, or a generic ACP command, install that CLI in the
-image as part of the deployment wrapper.
+image as part of the deployment wrapper. Use a Node Bookworm image with
+`npm`/`npx`, `git`, certificates, `curl`, and `openssh-client`; avoid the slim
+variant as the default because it omits common runtime tools. If you need fully
+repeatable builds, pin a concrete supported Bookworm tag such as
+`node:24-bookworm`.
 
 Polling mode is the default and does not require a published port. Webhook mode
 requires `relay.telegram.webhook.enabled=true`,
