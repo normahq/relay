@@ -466,6 +466,9 @@ func TestInitCommand_GeneratedConfigLoadableByRelayLoader(t *testing.T) {
 	if got := doc.Relay.Provider; got != testRelayProviderCodex {
 		t.Fatalf("doc.Relay.Provider = %q, want %s", got, testRelayProviderCodex)
 	}
+	if got := doc.Relay.Sessions.Persistence; got != "sqlite" {
+		t.Fatalf("doc.Relay.Sessions.Persistence = %q, want sqlite", got)
+	}
 }
 
 func TestInitCommand_FailsWhenTelegramTokenMissing(t *testing.T) {

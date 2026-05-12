@@ -122,7 +122,7 @@ relay:
   working_dir: ""
   state_dir: ".config/relay"
   sessions:
-    persistence: "memory"
+    persistence: "sqlite"
   memory:
     enabled: true
   workspace:
@@ -136,7 +136,7 @@ Common settings:
 
 - `relay.provider`: provider ID selected during `relay init`.
 - `relay.telegram.token`: Telegram bot token, usually supplied by `.env` as `RELAY_TELEGRAM_TOKEN`.
-- `relay.sessions.persistence`: `memory` by default; set to `sqlite` to keep ADK conversation history across restarts until `/reset` or explicit `/close`.
+- `relay.sessions.persistence`: `sqlite` by default; keeps ADK conversation history across restarts until `/reset` or explicit `/close`. Set to `memory` to keep runtime conversation state process-local.
 - `relay.memory.enabled`: `true` by default; controls `${relay.state_dir}/MEMORY.md`, `/memory`, and `relay.memory.*` MCP tools.
 - `${relay.state_dir}/SOUL.md`: optional operator instructions read at session start/restore when the file exists; independent from `relay.memory.enabled`.
 - `relay.workspace.mode`: `auto` by default; uses Git worktrees when Relay runs in a Git repository.
@@ -177,7 +177,7 @@ and workspace reference.
 - `telegram token is required`: run `relay init`, set `RELAY_TELEGRAM_TOKEN` in `.env`, or set `relay.telegram.token` in config.
 - `no supported agent CLI detected`: install or expose one of `codex`, `opencode`, `copilot`, `gemini`, or `claude`.
 - `relay.provider is required`: rerun `relay init` or set `relay.provider` to a configured provider ID.
-- Session history should survive restarts: set `relay.sessions.persistence=sqlite` or `RELAY_SESSIONS_PERSISTENCE=sqlite`.
+- Session history should not survive restarts: set `relay.sessions.persistence=memory` or `RELAY_SESSIONS_PERSISTENCE=memory`.
 - Memory facts are not visible in an active session: memory is snapshotted when a session starts or restores; use `/reset` or `/close` to recreate the provider session.
 - Workspace import/export issues: check `relay.workspace.mode`, `relay.workspace.base_branch`, and that Relay is running in the expected Git checkout.
 - Progress updates are too noisy: set `relay.telegram.plan_updates=false`.

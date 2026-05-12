@@ -119,6 +119,9 @@ relay:
 	if !doc.Relay.Memory.Enabled {
 		t.Fatal("memory.enabled = false, want true from defaults")
 	}
+	if doc.Relay.Sessions.Persistence != "sqlite" {
+		t.Fatalf("sessions.persistence = %q, want sqlite from defaults", doc.Relay.Sessions.Persistence)
+	}
 }
 
 func TestLoadConfigDocument_ExplicitMissingProfileFails(t *testing.T) {

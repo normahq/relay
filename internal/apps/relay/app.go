@@ -486,7 +486,7 @@ func validateTelegramFormattingMode(raw string) (string, error) {
 func validateSessionPersistence(raw string) (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(raw))
 	if mode == "" {
-		mode = sessionPersistenceMemory
+		mode = sessionPersistenceSQLite
 	}
 	switch mode {
 	case sessionPersistenceMemory, sessionPersistenceSQLite:

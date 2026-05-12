@@ -156,7 +156,7 @@ func TestValidateSessionPersistence(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "default empty", in: "", want: sessionPersistenceMemory},
+		{name: "default empty", in: "", want: sessionPersistenceSQLite},
 		{name: "trimmed memory", in: "  MEMORY ", want: sessionPersistenceMemory},
 		{name: "sqlite", in: "sqlite", want: sessionPersistenceSQLite},
 		{name: "invalid", in: "gorm", wantErr: true},

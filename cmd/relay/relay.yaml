@@ -50,9 +50,9 @@ relay:
 
   sessions:
     # ADK conversation/session persistence:
-    # - memory: keep runtime conversation state in memory only (default)
-    # - sqlite: persist runtime conversation state in relay.db until /reset or explicit /close
-    persistence: "memory"
+    # - sqlite: persist runtime conversation state in relay.db until /reset or explicit /close (default)
+    # - memory: keep runtime conversation state in memory only
+    persistence: "sqlite"
 
   memory:
     # Internal durable memory backed by ${relay.state_dir}/MEMORY.md.

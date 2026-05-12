@@ -367,9 +367,9 @@ session-start snapshot. New or restored sessions read the latest file.
   - Schema is migration-versioned and auto-applied on startup.
   - Relative paths are resolved from `relay.working_dir`.
   - Default: `.config/relay`
-- `relay.sessions.persistence`: `memory|sqlite` (default `memory`)
-  - `memory`: ADK conversation/runtime state is process-local; only Relay metadata is persisted.
+- `relay.sessions.persistence`: `sqlite|memory` (default `sqlite`)
   - `sqlite`: ADK session events and state are persisted in `relay.db` and reused after restart until `/reset` or explicit `/close`.
+  - `memory`: ADK conversation/runtime state is process-local; only Relay metadata is persisted.
 - `relay.memory.enabled`: enable internal durable memory (default `true`)
   - when disabled, Relay does not snapshot `MEMORY.md`, register `relay.memory.*` MCP tools, or expose `/memory` contents.
 - internal durable memory uses `${relay.state_dir}/MEMORY.md` when `relay.memory.enabled=true`
@@ -416,7 +416,7 @@ Session key:
 - The owner session is bootstrapped for the bound owner DM chat (`topic_id=0`) during activation/startup when an owner is already registered.
 
 Relay always persists session metadata in `relay.db` for lazy restore.
-By default, ADK conversation/runtime state is in-memory. When `relay.sessions.persistence=sqlite`, Relay also persists ADK session events and state in `relay.db` until `/reset` or explicit `/close`.
+By default, Relay also persists ADK session events and state in `relay.db` until `/reset` or explicit `/close`. Set `relay.sessions.persistence=memory` to keep ADK conversation/runtime state process-local while retaining Relay session metadata for lazy restore.
 
 ## Message Flow
 
