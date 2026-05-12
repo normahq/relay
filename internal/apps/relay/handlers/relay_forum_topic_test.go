@@ -83,13 +83,12 @@ func TestRelayHandlerRegister_RegistersForumTopicMessageTypes(t *testing.T) {
 	}
 }
 
-func TestRelayHandlerOnForumTopicLifecycle_LogOnly(t *testing.T) {
+func TestRelayHandlerOnForumTopicLifecycle_NonClosingEventsDoNotStopSession(t *testing.T) {
 	handler := &RelayHandler{logger: zerolog.Nop(), channel: newRelayTestTelegramAdapter()}
 
 	tests := []messagetype.MessageType{
 		messagetype.ForumTopicCreated,
 		messagetype.ForumTopicEdited,
-		messagetype.ForumTopicClosed,
 		messagetype.ForumTopicReopened,
 	}
 
@@ -114,6 +113,47 @@ func TestRelayHandlerOnForumTopicLifecycle_LogOnly(t *testing.T) {
 				t.Fatalf("onForumTopicLifecycle() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestRelayHandlerOnForumTopicLifecycle_ClosedStopsTopicSession(t *testing.T) {
+	topicID := 77
+	locator := relaysession.NewTelegramSessionLocator(9001, topicID)
+	sessionManager := newRelaySessionManagerWithSession(t, locator, newRelayTopicSession(t, locator.SessionID))
+	turnDispatcher := &fakeTurnDispatcher{}
+	handler := &RelayHandler{
+		logger:         zerolog.Nop(),
+		channel:        newRelayTestTelegramAdapter(),
+		sessionManager: sessionManager,
+		turnDispatcher: turnDispatcher,
+	}
+	handler.setChatID(9001)
+
+	event := &events.MessageEvent{
+		Type: messagetype.ForumTopicClosed,
+		Message: &client.Message{
+			MessageId:       42,
+			MessageThreadId: &topicID,
+			Chat: client.Chat{
+				Id:   9001,
+				Type: "supergroup",
+			},
+			From: &client.User{Id: 101},
+		},
+	}
+
+	if err := handler.onForumTopicLifecycle(context.Background(), event); err != nil {
+		t.Fatalf("onForumTopicLifecycle() error = %v", err)
+	}
+
+	if len(turnDispatcher.cancelCalls) != 1 {
+		t.Fatalf("CancelSession calls = %d, want 1", len(turnDispatcher.cancelCalls))
+	}
+	if got := turnDispatcher.cancelCalls[0]; got.SessionID != locator.SessionID || !got.ClearQueued {
+		t.Fatalf("CancelSession call = %+v, want session=%s clearQueued=true", got, locator.SessionID)
+	}
+	if _, err := sessionManager.GetSession(locator); err == nil {
+		t.Fatal("GetSession() error = nil, want stopped session")
 	}
 }
 
@@ -488,6 +528,7 @@ func newRelaySessionManagerWithSession(t *testing.T, locator relaysession.Sessio
 
 	m := &relaysession.Manager{}
 	setUnexportedField(t, m, "sessions", map[string]*relaysession.TopicSession{locator.SessionID: ts})
+	setUnexportedField(t, m, "sessionStore", &fakeRelayRestoreSessionStore{})
 	return m
 }
 

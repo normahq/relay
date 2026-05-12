@@ -10,6 +10,7 @@ import (
 	"github.com/normahq/relay/internal/apps/relay/telegramfmt"
 	"github.com/rs/zerolog"
 	"github.com/tgbotkit/client"
+	"github.com/tgbotkit/runtime/respond"
 )
 
 const telegramSendTimeout = 30 * time.Second
@@ -17,6 +18,7 @@ const telegramSendTimeout = 30 * time.Second
 // Messenger handles all Telegram message sending for the relay.
 type Messenger struct {
 	client                   client.ClientWithResponsesInterface
+	responder                *respond.Responder
 	logger                   zerolog.Logger
 	agentReplyFormattingMode string
 }
@@ -25,6 +27,7 @@ type Messenger struct {
 func NewMessenger(client client.ClientWithResponsesInterface, logger zerolog.Logger) *Messenger {
 	return &Messenger{
 		client:                   client,
+		responder:                respond.New(client),
 		logger:                   logger.With().Str("component", "relay.messenger").Logger(),
 		agentReplyFormattingMode: telegramfmt.ModeMarkdownV2,
 	}
@@ -69,17 +72,14 @@ func (m *Messenger) SendDraftPlain(ctx context.Context, chatID int64, draftID in
 
 // SendPlain sends a plain-text message.
 func (m *Messenger) SendPlain(ctx context.Context, chatID int64, text string, topicID int) error {
-	req := client.SendMessageJSONRequestBody{
-		ChatId: chatID,
-		Text:   text,
-	}
+	target := respond.ChatTarget{ChatID: chatID}
 	if topicID != 0 {
-		req.MessageThreadId = &topicID
+		target.MessageThreadID = &topicID
 	}
 	sendCtx, cancel := telegramSendContext(ctx)
 	defer cancel()
 
-	_, err := m.client.SendMessageWithResponse(sendCtx, req)
+	_, err := m.responder.SendText(sendCtx, target, text)
 	if err != nil {
 		return fmt.Errorf("sending message to chat %d: %w", chatID, err)
 	}

@@ -135,12 +135,19 @@ func (m *Manager) RestoreSession(ctx context.Context, sessionCtx SessionContext)
 
 	restoredCtx := SessionContext{
 		Locator: recordLocator,
-		UserID:  sessionCtx.UserID,
+		UserID:  restoredSessionUserID(record, sessionCtx.UserID),
 	}
 	if err := m.createSession(ctx, restoredCtx, sessionLabel, &record); err != nil {
 		return nil, err
 	}
 	return m.GetSession(recordLocator)
+}
+
+func restoredSessionUserID(record relaystate.SessionRecord, fallback string) string {
+	if userID := strings.TrimSpace(record.UserID); userID != "" {
+		return userID
+	}
+	return fallback
 }
 
 // RestoreTelegramSession restores a Telegram session from persisted metadata.

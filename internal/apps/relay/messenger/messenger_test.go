@@ -103,6 +103,55 @@ func TestSendPlainUsesBoundedSendContext(t *testing.T) {
 	assertContextDeadlineWithin(t, tgClient.messageContexts[0], telegramSendTimeout)
 }
 
+func TestSendPlain_IncludesMessageThreadIDWhenTopicProvided(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{}
+	m := NewMessenger(tgClient, zerolog.Nop())
+
+	if err := m.SendPlain(context.Background(), 9001, "hello", 77); err != nil {
+		t.Fatalf("SendPlain() error = %v", err)
+	}
+
+	if len(tgClient.messages) != 1 {
+		t.Fatalf("message calls = %d, want 1", len(tgClient.messages))
+	}
+	got := tgClient.messages[0]
+	if got.ChatId != 9001 {
+		t.Fatalf("chat_id = %d, want 9001", got.ChatId)
+	}
+	if got.Text != "hello" {
+		t.Fatalf("text = %q, want hello", got.Text)
+	}
+	if got.MessageThreadId == nil || *got.MessageThreadId != 77 {
+		t.Fatalf("message_thread_id = %v, want 77", got.MessageThreadId)
+	}
+}
+
+func TestSendPlain_ReturnsResponderError(t *testing.T) {
+	t.Parallel()
+
+	tgClient := &fakeChatActionClient{
+		sendMessageResults: []sendMessageResult{
+			{
+				resp: &client.SendMessageResponse{
+					HTTPResponse: &http.Response{StatusCode: http.StatusBadRequest, Status: "400 Bad Request"},
+					JSON400:      &client.ErrorResponse{Description: "Bad Request: chat not found"},
+				},
+			},
+		},
+	}
+	m := NewMessenger(tgClient, zerolog.Nop())
+
+	err := m.SendPlain(context.Background(), 9001, "hello", 0)
+	if err == nil {
+		t.Fatal("SendPlain() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "send message") {
+		t.Fatalf("SendPlain() error = %v, want responder send error", err)
+	}
+}
+
 func TestSendAgentReplyUsesBoundedSendContextForRetry(t *testing.T) {
 	t.Parallel()
 

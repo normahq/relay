@@ -416,6 +416,14 @@ func (h *RelayHandler) onForumTopicLifecycle(_ context.Context, event *events.Me
 		evt.Msg("forum topic edited")
 	case messagetype.ForumTopicClosed:
 		evt.Msg("forum topic closed")
+		if h.turnDispatcher != nil {
+			if _, _, err := h.turnDispatcher.CancelSession(lifecycle.Locator, true); err != nil {
+				h.logger.Warn().Err(err).Int64("chat_id", chatID).Int("topic_id", topicID).Msg("failed to cancel closed topic session turns")
+			}
+		}
+		if h.sessionManager != nil {
+			h.sessionManager.StopSession(lifecycle.Locator)
+		}
 	case messagetype.ForumTopicReopened:
 		evt.Msg("forum topic reopened")
 	default:

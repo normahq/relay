@@ -515,6 +515,67 @@ func TestRestoreSession_AlwaysUsesCurrentRelayProviderBackend(t *testing.T) {
 	}
 }
 
+func TestRestoreSession_UserIDSelection(t *testing.T) {
+	tests := []struct {
+		name            string
+		persistedUserID string
+		wantUserID      string
+	}{
+		{
+			name:            "persisted user id",
+			persistedUserID: "tg-101",
+			wantUserID:      "tg-101",
+		},
+		{
+			name:            "fallback current user id",
+			persistedUserID: " ",
+			wantUserID:      "tg-202",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := &fakeAgentBuilder{}
+			runtimeManager := &fakeRelayRuntimeManager{providerID: "relay-provider"}
+			locator := NewTelegramSessionLocator(10, 42)
+			store := &fakeSessionStore{
+				recordsByAddress: map[string]relaystate.SessionRecord{
+					sessionAddressKey(relaystate.ChannelTypeTelegram, "10:42"): {
+						SessionID:   locator.SessionID,
+						UserID:      tt.persistedUserID,
+						ChannelType: relaystate.ChannelTypeTelegram,
+						AddressKey:  "10:42",
+						AddressJSON: `{"chat_id":10,"topic_id":42}`,
+						AgentName:   "persisted-label",
+						Status:      relaystate.SessionStatusActive,
+					},
+				},
+			}
+
+			m := &Manager{
+				relayProviderName: "relay-provider",
+				runtimeManager:    runtimeManager,
+				agentBuilder:      builder,
+				logger:            zerolog.Nop(),
+				sessions:          make(map[string]*TopicSession),
+				sessionStore:      store,
+			}
+
+			_, err := m.RestoreSession(context.Background(), SessionContext{
+				Locator: locator,
+				UserID:  "tg-202",
+			})
+
+			if err != nil {
+				t.Fatalf("RestoreSession() error = %v", err)
+			}
+			if got := builder.createRuntimeSessionUserIDs[0]; got != tt.wantUserID {
+				t.Fatalf("CreateRuntimeSession userID = %q, want %q", got, tt.wantUserID)
+			}
+		})
+	}
+}
+
 func TestRestoreSession_UsesAutoLabelWhenPersistedLabelMissing(t *testing.T) {
 	builder := &fakeAgentBuilder{}
 	runtimeManager := &fakeRelayRuntimeManager{providerID: "new-relay-provider"}
