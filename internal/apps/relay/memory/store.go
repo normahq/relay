@@ -18,10 +18,8 @@ const (
 )
 
 type Store struct {
-	stateDir    string
-	enabled     bool
-	soulEnabled bool
-	mu          sync.Mutex
+	stateDir string
+	mu       sync.Mutex
 }
 
 type Snapshot struct {
@@ -29,20 +27,10 @@ type Snapshot struct {
 	Soul   string
 }
 
-func NewStore(stateDir string, enabled, soulEnabled bool) *Store {
+func NewStore(stateDir string) *Store {
 	return &Store{
-		stateDir:    strings.TrimSpace(stateDir),
-		enabled:     enabled,
-		soulEnabled: soulEnabled,
+		stateDir: strings.TrimSpace(stateDir),
 	}
-}
-
-func (s *Store) Enabled() bool {
-	return s != nil && s.enabled
-}
-
-func (s *Store) SoulEnabled() bool {
-	return s != nil && s.enabled && s.soulEnabled
 }
 
 func (s *Store) MemoryPath() string {
@@ -60,14 +48,14 @@ func (s *Store) SoulPath() string {
 }
 
 func (s *Store) ReadMemory(ctx context.Context) (string, error) {
-	if s == nil || !s.enabled {
+	if s == nil {
 		return "", nil
 	}
 	return s.readFile(ctx, s.MemoryPath())
 }
 
 func (s *Store) ReadSoul(ctx context.Context) (string, error) {
-	if s == nil || !s.enabled || !s.soulEnabled {
+	if s == nil {
 		return "", nil
 	}
 	return s.readFile(ctx, s.SoulPath())
@@ -89,8 +77,8 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func (s *Store) Remember(ctx context.Context, fact string) error {
-	if s == nil || !s.enabled {
-		return fmt.Errorf("memory is disabled")
+	if s == nil {
+		return fmt.Errorf("memory store is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return err

@@ -428,7 +428,7 @@ func TestCommandHandlerOnCommand_ResetWithArgsShowsUsage(t *testing.T) {
 
 func TestCommandHandlerOnCommand_MemoryReadsCurrentMemory(t *testing.T) {
 	handler, _, _, tgClient := newCommandHandlerTestHarness(t)
-	handler.memoryStore = memory.NewStore(t.TempDir(), true, true)
+	handler.memoryStore = memory.NewStore(t.TempDir())
 	if err := handler.memoryStore.Remember(context.Background(), "project uses Relay memory"); err != nil {
 		t.Fatalf("Remember() error = %v", err)
 	}
@@ -443,7 +443,7 @@ func TestCommandHandlerOnCommand_MemoryReadsCurrentMemory(t *testing.T) {
 
 func TestCommandHandlerOnCommand_MemoryRequiresDM(t *testing.T) {
 	handler, _, _, tgClient := newCommandHandlerTestHarness(t)
-	handler.memoryStore = memory.NewStore(t.TempDir(), true, true)
+	handler.memoryStore = memory.NewStore(t.TempDir())
 	topicID := 10
 
 	err := handler.onCommand(context.Background(), newCommandEventWithChatType("memory", "", 101, 9001, &topicID, "supergroup"))
@@ -571,7 +571,7 @@ func newCommandHandlerTestHarness(t *testing.T) (*CommandHandler, *fakeCommandSe
 		sessionManager: sessionManager,
 		turnDispatcher: turnDispatcher,
 		messenger:      msg,
-		memoryStore:    memory.NewStore(t.TempDir(), true, true),
+		memoryStore:    memory.NewStore(t.TempDir()),
 	}
 	return handler, sessionManager, turnDispatcher, tgClient
 }

@@ -140,8 +140,6 @@ RELAY_TELEGRAM_TOKEN=123456:ABCDEF
 RELAY_TELEGRAM_FORMATTING_MODE=markdownv2
 RELAY_TELEGRAM_WEBHOOK_ENABLED=true
 RELAY_TELEGRAM_WEBHOOK_URL=https://example.com/telegram/webhook
-RELAY_MEMORY_ENABLED=true
-RELAY_MEMORY_SOUL_ENABLED=true
 ```
 
 Config shape:
@@ -157,9 +155,6 @@ relay:
   telegram:
     token: ""
     formatting_mode: "markdownv2"
-  memory:
-    enabled: true
-    soul_enabled: true
 profiles:
   <profile>:
     relay:
@@ -371,16 +366,14 @@ session-start snapshot. New or restored sessions read the latest file.
 - `relay.sessions.persistence`: `memory|sqlite` (default `memory`)
   - `memory`: ADK conversation/runtime state is process-local; only Relay metadata is persisted.
   - `sqlite`: ADK session events and state are persisted in `relay.db` and reused after restart until `/reset` or explicit `/close`.
-- `relay.memory.enabled`: enable internal durable memory (default `true`)
-  - memory file: `${relay.state_dir}/MEMORY.md`
-  - `/memory` reads the current file in owner/collaborator direct messages
-  - `relay.memory.read` reads the file from MCP
-  - `relay.memory.remember` appends facts to the file from MCP
-  - memory is snapshotted into ADK session state when a session starts or restores; active sessions are not refreshed after writes
-- `relay.memory.soul_enabled`: enable optional session-start operator instructions (default `true`)
-  - SOUL file: `${relay.state_dir}/SOUL.md`
-  - Relay reads the file on session start/restore and injects it with the memory snapshot
-  - Relay does not expose MCP mutation for `SOUL.md`; edit the file directly
+- internal durable memory uses `${relay.state_dir}/MEMORY.md`
+  - `/memory` reads the current file in owner/collaborator direct messages.
+  - `relay.memory.read` reads the file from MCP.
+  - `relay.memory.remember` appends facts to the file from MCP.
+  - memory is snapshotted into ADK session state when a session starts or restores; active sessions are not refreshed after writes.
+- optional session-start operator instructions use `${relay.state_dir}/SOUL.md`
+  - Relay reads the file on session start/restore when it exists and injects it with the memory snapshot.
+  - Relay does not expose MCP mutation for `SOUL.md`; edit the file directly.
 - owner auth token is generated during `relay init`, persisted in `relay.db`, and reused by `relay start`
   - if token is missing in existing state, `relay start` backfills one-time and persists it
   - if no owner is registered yet, `relay start` logs the owner bootstrap command and deeplink again to help finish first-time onboarding

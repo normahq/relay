@@ -184,12 +184,6 @@ func (h *CommandHandler) onMemoryCommand(ctx context.Context, commandCtx relayte
 		}
 		return nil
 	}
-	if h.memoryStore == nil || !h.memoryStore.Enabled() {
-		if err := h.channel.SendPlain(ctx, commandCtx.Locator, "Memory is disabled."); err != nil {
-			return err
-		}
-		return nil
-	}
 	content, err := h.memoryStore.ReadMemory(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("failed to read relay memory")

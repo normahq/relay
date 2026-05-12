@@ -65,8 +65,6 @@ type relayPromptData struct {
 	FormattingExample string
 	GlobalInstruction string
 	Instruction       string
-	MemoryEnabled     bool
-	SoulEnabled       bool
 }
 
 func (b *Builder) buildRelayInstruction(
@@ -125,8 +123,6 @@ func (b *Builder) buildRelayInstruction(
 	}
 	data.GlobalInstruction = strings.TrimSpace(b.relayGlobalInstruction)
 	data.Instruction = strings.TrimSpace(agentInstruction)
-	data.MemoryEnabled = b.memoryStore != nil && b.memoryStore.Enabled()
-	data.SoulEnabled = b.memoryStore != nil && b.memoryStore.SoulEnabled()
 
 	var buf bytes.Buffer
 	tmpl := template.Must(template.New("relay").Parse(relayInstructionTmpl))
@@ -523,7 +519,7 @@ func (b *Builder) addMemorySnapshot(ctx context.Context, state map[string]any) (
 	}
 	state[memory.MemoryStateKey] = ""
 	state[memory.SoulStateKey] = ""
-	if b.memoryStore == nil || !b.memoryStore.Enabled() {
+	if b.memoryStore == nil {
 		return state, nil
 	}
 	snapshot, err := b.memoryStore.Snapshot(ctx)

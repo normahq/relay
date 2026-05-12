@@ -18,7 +18,7 @@ func TestStoreSnapshotReadsStateDirFiles(t *testing.T) {
 		t.Fatalf("write soul: %v", err)
 	}
 
-	got, err := NewStore(stateDir, true, true).Snapshot(context.Background())
+	got, err := NewStore(stateDir).Snapshot(context.Background())
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
@@ -34,7 +34,7 @@ func TestStoreRememberAppendsMemory(t *testing.T) {
 	t.Parallel()
 
 	stateDir := t.TempDir()
-	store := NewStore(stateDir, true, true)
+	store := NewStore(stateDir)
 	if err := store.Remember(context.Background(), "first fact"); err != nil {
 		t.Fatalf("Remember(first) error = %v", err)
 	}
@@ -52,18 +52,18 @@ func TestStoreRememberAppendsMemory(t *testing.T) {
 	}
 }
 
-func TestStoreDisabledIsEmpty(t *testing.T) {
+func TestStoreMissingSoulIsEmpty(t *testing.T) {
 	t.Parallel()
 
 	stateDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stateDir, MemoryFileName), []byte("fact\n"), 0o600); err != nil {
 		t.Fatalf("write memory: %v", err)
 	}
-	got, err := NewStore(stateDir, false, true).Snapshot(context.Background())
+	got, err := NewStore(stateDir).Snapshot(context.Background())
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if got.Memory != "" || got.Soul != "" {
-		t.Fatalf("Snapshot() = %#v, want empty", got)
+	if got.Memory != "fact" || got.Soul != "" {
+		t.Fatalf("Snapshot() = %#v, want memory fact and empty soul", got)
 	}
 }

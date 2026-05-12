@@ -54,14 +54,6 @@ relay:
     # - sqlite: persist runtime conversation state in relay.db until /reset or explicit /close
     persistence: "memory"
 
-  memory:
-    # Internal durable memory backed by ${relay.state_dir}/MEMORY.md.
-    # Agents can append facts through relay.memory.remember; /memory reads the file.
-    enabled: true
-    # Optional operator instructions backed by ${relay.state_dir}/SOUL.md.
-    # SOUL.md is read on session start/restore and appended to the system instruction.
-    soul_enabled: true
-
   workspace:
     # Workspace mode:
     # - on: always use git worktrees per session

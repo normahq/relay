@@ -120,9 +120,6 @@ relay:
   state_dir: ".config/relay"
   sessions:
     persistence: "memory"
-  memory:
-    enabled: true
-    soul_enabled: true
   workspace:
     mode: "auto"
     base_branch: ""
@@ -135,8 +132,8 @@ Common settings:
 - `relay.provider`: provider ID selected during `relay init`.
 - `relay.telegram.token`: Telegram bot token, usually supplied by `.env` as `RELAY_TELEGRAM_TOKEN`.
 - `relay.sessions.persistence`: `memory` by default; set to `sqlite` to keep ADK conversation history across restarts until `/reset` or explicit `/close`.
-- `relay.memory.enabled`: enables `${relay.state_dir}/MEMORY.md`, `/memory`, and `relay.memory.*` MCP tools.
-- `relay.memory.soul_enabled`: reads optional `${relay.state_dir}/SOUL.md` at session start/restore.
+- `${relay.state_dir}/MEMORY.md`: durable facts available through `/memory` and `relay.memory.*` MCP tools.
+- `${relay.state_dir}/SOUL.md`: optional operator instructions read at session start/restore when the file exists.
 - `relay.workspace.mode`: `auto` by default; uses Git worktrees when Relay runs in a Git repository.
 - `relay.mcp_servers`: extra MCP server IDs added to every Relay-started session.
 

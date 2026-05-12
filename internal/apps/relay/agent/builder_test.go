@@ -126,7 +126,7 @@ func TestBuildRelayInstruction_IncludesMemoryPlaceholdersWhenEnabled(t *testing.
 	t.Parallel()
 
 	builder := &Builder{
-		memoryStore: memory.NewStore(t.TempDir(), true, true),
+		memoryStore: memory.NewStore(t.TempDir()),
 	}
 	got := builder.buildRelayInstruction(
 		"tg-1-2",
@@ -320,7 +320,7 @@ func TestCreateRuntimeSession_IncludesMemorySnapshotState(t *testing.T) {
 	builder := &Builder{
 		factory:     agentfactory.New(providers, mcpregistry.New(nil)),
 		normaCfg:    runtimeconfig.RuntimeConfig{Providers: providers},
-		memoryStore: memory.NewStore(stateDir, true, true),
+		memoryStore: memory.NewStore(stateDir),
 	}
 	runtime := &BuiltRuntime{
 		SessionSvc: adksession.InMemoryService(),

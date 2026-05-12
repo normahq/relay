@@ -126,7 +126,7 @@ func Module(
 				fx.ResultTags(`name:"relay_state_dir"`),
 			),
 			func() *memory.Store {
-				return memory.NewStore(stateDir, cfg.Relay.Memory.Enabled, cfg.Relay.Memory.SoulEnabled)
+				return memory.NewStore(stateDir)
 			},
 		),
 		fx.Provide(
