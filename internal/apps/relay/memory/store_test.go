@@ -18,7 +18,7 @@ func TestStoreSnapshotReadsStateDirFiles(t *testing.T) {
 		t.Fatalf("write soul: %v", err)
 	}
 
-	got, err := NewStore(stateDir).Snapshot(context.Background())
+	got, err := NewStore(stateDir, true).Snapshot(context.Background())
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
@@ -34,7 +34,7 @@ func TestStoreRememberAppendsMemory(t *testing.T) {
 	t.Parallel()
 
 	stateDir := t.TempDir()
-	store := NewStore(stateDir)
+	store := NewStore(stateDir, true)
 	if err := store.Remember(context.Background(), "first fact"); err != nil {
 		t.Fatalf("Remember(first) error = %v", err)
 	}
@@ -59,11 +59,38 @@ func TestStoreMissingSoulIsEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stateDir, MemoryFileName), []byte("fact\n"), 0o600); err != nil {
 		t.Fatalf("write memory: %v", err)
 	}
-	got, err := NewStore(stateDir).Snapshot(context.Background())
+	got, err := NewStore(stateDir, true).Snapshot(context.Background())
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
 	if got.Memory != "fact" || got.Soul != "" {
 		t.Fatalf("Snapshot() = %#v, want memory fact and empty soul", got)
+	}
+}
+
+func TestStoreMemoryDisabledStillReadsSoul(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, MemoryFileName), []byte("fact\n"), 0o600); err != nil {
+		t.Fatalf("write memory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, SoulFileName), []byte("instruction\n"), 0o600); err != nil {
+		t.Fatalf("write soul: %v", err)
+	}
+
+	store := NewStore(stateDir, false)
+	got, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if got.Memory != "" {
+		t.Fatalf("Snapshot().Memory = %q, want empty when disabled", got.Memory)
+	}
+	if got.Soul != "instruction" {
+		t.Fatalf("Snapshot().Soul = %q, want instruction", got.Soul)
+	}
+	if err := store.Remember(context.Background(), "new fact"); err == nil {
+		t.Fatal("Remember() error = nil, want disabled error")
 	}
 }

@@ -428,7 +428,7 @@ func TestCommandHandlerOnCommand_ResetWithArgsShowsUsage(t *testing.T) {
 
 func TestCommandHandlerOnCommand_MemoryReadsCurrentMemory(t *testing.T) {
 	handler, _, _, tgClient := newCommandHandlerTestHarness(t)
-	handler.memoryStore = memory.NewStore(t.TempDir())
+	handler.memoryStore = memory.NewStore(t.TempDir(), true)
 	if err := handler.memoryStore.Remember(context.Background(), "project uses Relay memory"); err != nil {
 		t.Fatalf("Remember() error = %v", err)
 	}
@@ -443,7 +443,7 @@ func TestCommandHandlerOnCommand_MemoryReadsCurrentMemory(t *testing.T) {
 
 func TestCommandHandlerOnCommand_MemoryRequiresDM(t *testing.T) {
 	handler, _, _, tgClient := newCommandHandlerTestHarness(t)
-	handler.memoryStore = memory.NewStore(t.TempDir())
+	handler.memoryStore = memory.NewStore(t.TempDir(), true)
 	topicID := 10
 
 	err := handler.onCommand(context.Background(), newCommandEventWithChatType("memory", "", 101, 9001, &topicID, "supergroup"))
@@ -452,6 +452,18 @@ func TestCommandHandlerOnCommand_MemoryRequiresDM(t *testing.T) {
 	}
 
 	assertLastSentContains(t, tgClient, "This command is only available in direct messages.")
+}
+
+func TestCommandHandlerOnCommand_MemoryDisabled(t *testing.T) {
+	handler, _, _, tgClient := newCommandHandlerTestHarness(t)
+	handler.memoryStore = memory.NewStore(t.TempDir(), false)
+
+	err := handler.onCommand(context.Background(), newCommandEvent("memory", "", 101, 9001, nil))
+	if err != nil {
+		t.Fatalf("onCommand() error = %v", err)
+	}
+
+	assertLastSentContains(t, tgClient, "Memory is disabled.")
 }
 
 type fakeCommandSessionManager struct {
@@ -571,7 +583,7 @@ func newCommandHandlerTestHarness(t *testing.T) (*CommandHandler, *fakeCommandSe
 		sessionManager: sessionManager,
 		turnDispatcher: turnDispatcher,
 		messenger:      msg,
-		memoryStore:    memory.NewStore(t.TempDir()),
+		memoryStore:    memory.NewStore(t.TempDir(), true),
 	}
 	return handler, sessionManager, turnDispatcher, tgClient
 }

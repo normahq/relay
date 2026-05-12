@@ -43,23 +43,23 @@ func TestBundledRegistryURL(t *testing.T) {
 }
 
 func TestBundledRelayServerInstructionsReflectWorkspaceMode(t *testing.T) {
-	enabled := bundledRelayServerInstructions(true)
+	enabled := bundledRelayServerInstructions(true, true)
 	if !strings.Contains(enabled, "relay.workspace is available") {
-		t.Fatalf("bundledRelayServerInstructions(true) = %q, want workspace-enabled guidance", enabled)
+		t.Fatalf("bundledRelayServerInstructions(true, true) = %q, want workspace-enabled guidance", enabled)
 	}
 	if !strings.Contains(enabled, "relay.memory") {
-		t.Fatalf("bundledRelayServerInstructions(true) = %q, want memory guidance", enabled)
+		t.Fatalf("bundledRelayServerInstructions(true, true) = %q, want memory guidance", enabled)
 	}
 	if strings.Contains(enabled, "relay.agents.") {
-		t.Fatalf("bundledRelayServerInstructions(true) = %q, want relay.agents removed", enabled)
+		t.Fatalf("bundledRelayServerInstructions(true, true) = %q, want relay.agents removed", enabled)
 	}
 
-	disabled := bundledRelayServerInstructions(false)
+	disabled := bundledRelayServerInstructions(false, false)
 	if !strings.Contains(disabled, "relay.workspace is unavailable") {
-		t.Fatalf("bundledRelayServerInstructions(false) = %q, want workspace-disabled guidance", disabled)
+		t.Fatalf("bundledRelayServerInstructions(false, false) = %q, want workspace-disabled guidance", disabled)
 	}
-	if !strings.Contains(disabled, "relay.memory") {
-		t.Fatalf("bundledRelayServerInstructions(false) = %q, want memory guidance", disabled)
+	if strings.Contains(disabled, "relay.memory") {
+		t.Fatalf("bundledRelayServerInstructions(false, false) = %q, want no memory guidance", disabled)
 	}
 }
 

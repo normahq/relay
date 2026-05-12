@@ -40,10 +40,16 @@ Git workspace guidance:
 
 SOUL.md session-start instructions:
 {relay_soul?}
+{{if .MemoryEnabled}}
+
+Memory guidance:
+- If the user explicitly asks you to remember/save a durable fact or preference, call `relay.memory.remember`.
+- Save concise standalone facts only; do not save transient task state, raw chat logs, inferred assumptions, or secrets unless explicitly requested.
+- Remembered facts are stored in MEMORY.md and apply to future sessions after start/restore.
 
 MEMORY.md session-start facts:
 {relay_memory?}
-{{if .GlobalInstruction}}
+{{end}}{{if .GlobalInstruction}}
 
 Global instruction:
 {{.GlobalInstruction}}{{end}}{{if .Instruction}}

@@ -54,6 +54,12 @@ relay:
     # - sqlite: persist runtime conversation state in relay.db until /reset or explicit /close
     persistence: "memory"
 
+  memory:
+    # Internal durable memory backed by ${relay.state_dir}/MEMORY.md.
+    # If false, /memory and relay.memory.* MCP tools are disabled.
+    # SOUL.md remains active independently when present.
+    enabled: true
+
   workspace:
     # Workspace mode:
     # - on: always use git worktrees per session

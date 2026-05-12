@@ -126,7 +126,7 @@ func TestBuildRelayInstruction_IncludesMemoryPlaceholdersWhenEnabled(t *testing.
 	t.Parallel()
 
 	builder := &Builder{
-		memoryStore: memory.NewStore(t.TempDir()),
+		memoryStore: memory.NewStore(t.TempDir(), true),
 	}
 	got := builder.buildRelayInstruction(
 		"tg-1-2",
@@ -139,10 +139,44 @@ func TestBuildRelayInstruction_IncludesMemoryPlaceholdersWhenEnabled(t *testing.
 
 	for _, snippet := range []string{
 		"SOUL.md session-start instructions:\n{relay_soul?}",
+		"Memory guidance:",
+		"relay.memory.remember",
+		"explicitly asks you to remember/save",
+		"future sessions after start/restore",
 		"MEMORY.md session-start facts:\n{relay_memory?}",
 	} {
 		if !strings.Contains(got, snippet) {
 			t.Fatalf("buildRelayInstruction() missing snippet %q in output:\n%s", snippet, got)
+		}
+	}
+}
+
+func TestBuildRelayInstruction_ExcludesMemoryWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	builder := &Builder{
+		memoryStore: memory.NewStore(t.TempDir(), false),
+	}
+	got := builder.buildRelayInstruction(
+		"tg-1-2",
+		"telegram",
+		"alpha",
+		"norma/relay/tg-1-2",
+		"/tmp/work",
+		"main",
+	)
+
+	if !strings.Contains(got, "SOUL.md session-start instructions:\n{relay_soul?}") {
+		t.Fatalf("buildRelayInstruction() missing SOUL placeholder in output:\n%s", got)
+	}
+	for _, forbidden := range []string{
+		"Memory guidance:",
+		"relay.memory.remember",
+		"MEMORY.md session-start facts:",
+		"{relay_memory?}",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("buildRelayInstruction() contained %q with memory disabled:\n%s", forbidden, got)
 		}
 	}
 }
@@ -307,30 +341,7 @@ func TestCreateRuntimeSession_IncludesCanonicalCWDState(t *testing.T) {
 func TestCreateRuntimeSession_IncludesMemorySnapshotState(t *testing.T) {
 	t.Parallel()
 
-	stateDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stateDir, memory.MemoryFileName), []byte("remember this\n"), 0o600); err != nil {
-		t.Fatalf("write memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stateDir, memory.SoulFileName), []byte("be precise\n"), 0o600); err != nil {
-		t.Fatalf("write soul: %v", err)
-	}
-	providers := map[string]agentconfig.Config{
-		"alpha": {Type: "llm"},
-	}
-	builder := &Builder{
-		factory:     agentfactory.New(providers, mcpregistry.New(nil)),
-		normaCfg:    runtimeconfig.RuntimeConfig{Providers: providers},
-		memoryStore: memory.NewStore(stateDir),
-	}
-	runtime := &BuiltRuntime{
-		SessionSvc: adksession.InMemoryService(),
-		AppName:    "norma-relay",
-	}
-
-	sess, err := builder.CreateRuntimeSession(context.Background(), runtime, "alpha", "user-1", "s-1", t.TempDir())
-	if err != nil {
-		t.Fatalf("CreateRuntimeSession() error = %v", err)
-	}
+	sess := createRuntimeSessionWithMemory(t, true)
 	gotMemory, err := sess.State().Get(memory.MemoryStateKey)
 	if err != nil {
 		t.Fatalf("session state get %q error = %v", memory.MemoryStateKey, err)
@@ -345,6 +356,56 @@ func TestCreateRuntimeSession_IncludesMemorySnapshotState(t *testing.T) {
 	if gotSoul != "be precise" {
 		t.Fatalf("session state %q = %v, want be precise", memory.SoulStateKey, gotSoul)
 	}
+}
+
+func TestCreateRuntimeSession_MemoryDisabledStillIncludesSoul(t *testing.T) {
+	t.Parallel()
+
+	sess := createRuntimeSessionWithMemory(t, false)
+	gotMemory, err := sess.State().Get(memory.MemoryStateKey)
+	if err != nil {
+		t.Fatalf("session state get %q error = %v", memory.MemoryStateKey, err)
+	}
+	if gotMemory != "" {
+		t.Fatalf("session state %q = %v, want empty", memory.MemoryStateKey, gotMemory)
+	}
+	gotSoul, err := sess.State().Get(memory.SoulStateKey)
+	if err != nil {
+		t.Fatalf("session state get %q error = %v", memory.SoulStateKey, err)
+	}
+	if gotSoul != "be precise" {
+		t.Fatalf("session state %q = %v, want be precise", memory.SoulStateKey, gotSoul)
+	}
+}
+
+func createRuntimeSessionWithMemory(t *testing.T, memoryEnabled bool) adksession.Session {
+	t.Helper()
+
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, memory.MemoryFileName), []byte("remember this\n"), 0o600); err != nil {
+		t.Fatalf("write memory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, memory.SoulFileName), []byte("be precise\n"), 0o600); err != nil {
+		t.Fatalf("write soul: %v", err)
+	}
+	providers := map[string]agentconfig.Config{
+		"alpha": {Type: "llm"},
+	}
+	builder := &Builder{
+		factory:     agentfactory.New(providers, mcpregistry.New(nil)),
+		normaCfg:    runtimeconfig.RuntimeConfig{Providers: providers},
+		memoryStore: memory.NewStore(stateDir, memoryEnabled),
+	}
+	runtime := &BuiltRuntime{
+		SessionSvc: adksession.InMemoryService(),
+		AppName:    "norma-relay",
+	}
+
+	sess, err := builder.CreateRuntimeSession(context.Background(), runtime, "alpha", "user-1", "s-1", t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateRuntimeSession() error = %v", err)
+	}
+	return sess
 }
 
 func TestCreateRuntimeSession_InvalidCWD_FailsBeforeCreate(t *testing.T) {

@@ -22,6 +22,7 @@ func TestLoadConfigDocument_AppliesProfileRelayOverrides(t *testing.T) {
 	workingDir := t.TempDir()
 	t.Setenv("RELAY_TELEGRAM_WEBHOOK_ENABLED", "true")
 	t.Setenv("RELAY_TELEGRAM_PLAN_UPDATES", "true")
+	t.Setenv("RELAY_MEMORY_ENABLED", "false")
 
 	if err := writeFile(filepath.Join(workingDir, ".config", "relay", "config.yaml"), `runtime:
   providers:
@@ -72,6 +73,9 @@ relay:
 	if !relayCfg.Relay.Telegram.PlanUpdates {
 		t.Fatal("plan_updates = false, want true from env override")
 	}
+	if relayCfg.Relay.Memory.Enabled {
+		t.Fatal("memory.enabled = true, want false from env override")
+	}
 }
 
 func TestLoadConfigDocument_ImplicitDefaultProfileDoesNotRequireProfilesDefault(t *testing.T) {
@@ -111,6 +115,9 @@ relay:
 	}
 	if doc.Relay.Provider != "relay_agent" {
 		t.Fatalf("provider = %q, want relay_agent", doc.Relay.Provider)
+	}
+	if !doc.Relay.Memory.Enabled {
+		t.Fatal("memory.enabled = false, want true from defaults")
 	}
 }
 

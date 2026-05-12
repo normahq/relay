@@ -18,8 +18,9 @@ const (
 )
 
 type Store struct {
-	stateDir string
-	mu       sync.Mutex
+	stateDir      string
+	memoryEnabled bool
+	mu            sync.Mutex
 }
 
 type Snapshot struct {
@@ -27,10 +28,15 @@ type Snapshot struct {
 	Soul   string
 }
 
-func NewStore(stateDir string) *Store {
+func NewStore(stateDir string, memoryEnabled bool) *Store {
 	return &Store{
-		stateDir: strings.TrimSpace(stateDir),
+		stateDir:      strings.TrimSpace(stateDir),
+		memoryEnabled: memoryEnabled,
 	}
+}
+
+func (s *Store) MemoryEnabled() bool {
+	return s != nil && s.memoryEnabled
 }
 
 func (s *Store) MemoryPath() string {
@@ -48,7 +54,7 @@ func (s *Store) SoulPath() string {
 }
 
 func (s *Store) ReadMemory(ctx context.Context) (string, error) {
-	if s == nil {
+	if s == nil || !s.memoryEnabled {
 		return "", nil
 	}
 	return s.readFile(ctx, s.MemoryPath())
@@ -79,6 +85,9 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 func (s *Store) Remember(ctx context.Context, fact string) error {
 	if s == nil {
 		return fmt.Errorf("memory store is required")
+	}
+	if !s.memoryEnabled {
+		return fmt.Errorf("memory is disabled")
 	}
 	if err := ctx.Err(); err != nil {
 		return err

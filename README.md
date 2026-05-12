@@ -81,7 +81,7 @@ setup and image details are documented in [`docs/relay.md`](docs/relay.md).
 - `/reset`: owner/collaborator command that clears conversation history for the current session.
 - `/close`: owner/collaborator direct-message command that resets history, then closes the current topic or restarts the owner session on the next message.
 - `/cancel`: owner/collaborator command that cancels in-flight work and drops queued turns for the current session.
-- `/memory`: owner/collaborator direct-message command that prints current `${relay.state_dir}/MEMORY.md` contents.
+- `/memory`: owner/collaborator direct-message command that prints current `${relay.state_dir}/MEMORY.md` contents when memory is enabled.
 - `/start owner=<owner_token>`: owner authentication/bootstrap in direct messages.
 - `/start invite=<invite_token>`: collaborator onboarding in direct messages.
 - `/user add|list|remove`: owner-only collaborator management.
@@ -120,6 +120,8 @@ relay:
   state_dir: ".config/relay"
   sessions:
     persistence: "memory"
+  memory:
+    enabled: true
   workspace:
     mode: "auto"
     base_branch: ""
@@ -132,8 +134,8 @@ Common settings:
 - `relay.provider`: provider ID selected during `relay init`.
 - `relay.telegram.token`: Telegram bot token, usually supplied by `.env` as `RELAY_TELEGRAM_TOKEN`.
 - `relay.sessions.persistence`: `memory` by default; set to `sqlite` to keep ADK conversation history across restarts until `/reset` or explicit `/close`.
-- `${relay.state_dir}/MEMORY.md`: durable facts available through `/memory` and `relay.memory.*` MCP tools.
-- `${relay.state_dir}/SOUL.md`: optional operator instructions read at session start/restore when the file exists.
+- `relay.memory.enabled`: `true` by default; controls `${relay.state_dir}/MEMORY.md`, `/memory`, and `relay.memory.*` MCP tools.
+- `${relay.state_dir}/SOUL.md`: optional operator instructions read at session start/restore when the file exists; independent from `relay.memory.enabled`.
 - `relay.workspace.mode`: `auto` by default; uses Git worktrees when Relay runs in a Git repository.
 - `relay.mcp_servers`: extra MCP server IDs added to every Relay-started session.
 

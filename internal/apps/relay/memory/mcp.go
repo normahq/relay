@@ -44,7 +44,7 @@ type service struct {
 }
 
 func RegisterTools(server *mcp.Server, store *Store) {
-	if server == nil || store == nil {
+	if server == nil || store == nil || !store.MemoryEnabled() {
 		return
 	}
 	svc := &service{store: store}

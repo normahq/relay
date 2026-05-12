@@ -13,6 +13,7 @@ type RelayConfig struct {
 	WorkingDir        string          `mapstructure:"working_dir"`
 	StateDir          string          `mapstructure:"state_dir"`
 	Sessions          SessionsConfig  `mapstructure:"sessions"`
+	Memory            MemoryConfig    `mapstructure:"memory"`
 	Workspace         WorkspaceConfig `mapstructure:"workspace"`
 	MCPServers        []string        `mapstructure:"mcp_servers"`
 	GlobalInstruction string          `mapstructure:"global_instruction"`
@@ -49,4 +50,8 @@ type WorkspaceConfig struct {
 
 type SessionsConfig struct {
 	Persistence string `mapstructure:"persistence"`
+}
+
+type MemoryConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }

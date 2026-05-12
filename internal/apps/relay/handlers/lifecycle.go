@@ -49,12 +49,14 @@ const (
 	internalMCPIdleTimeout       = 60 * time.Second
 )
 
-func bundledRelayServerInstructions(workspaceEnabled bool) string {
+func bundledRelayServerInstructions(workspaceEnabled, memoryEnabled bool) string {
 	instructions := `Use this bundled relay server for session-local relay tools.
 
 - relay.state stores persistent relay session and app state in relay.db.
 - relay config editing is not exposed through MCP; edit the relay config file directly.`
-	instructions += "\n- relay.memory stores durable facts in MEMORY.md; only call relay.memory.remember when the user explicitly asks you to remember or save a fact."
+	if memoryEnabled {
+		instructions += "\n- relay.memory stores durable facts in MEMORY.md; only call relay.memory.remember when the user explicitly asks you to remember or save a fact."
+	}
 	if workspaceEnabled {
 		instructions += "\n- relay.workspace is available and should be used for workspace import/export instead of manual branch landing."
 	} else {
@@ -150,7 +152,7 @@ func (m *InternalMCPManager) ensureBundledServers(ctx context.Context) error {
 			Name:    "relay",
 			Version: "1.0.0",
 		},
-		&mcp.ServerOptions{Instructions: bundledRelayServerInstructions(m.workspaceEnabled)},
+		&mcp.ServerOptions{Instructions: bundledRelayServerInstructions(m.workspaceEnabled, m.memoryStore.MemoryEnabled())},
 	)
 
 	sessionmcp.RegisterTools(server, m.stateStore)

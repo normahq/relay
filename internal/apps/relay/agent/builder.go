@@ -63,6 +63,7 @@ type relayPromptData struct {
 	FormattingMode    string
 	FormattingRule    string
 	FormattingExample string
+	MemoryEnabled     bool
 	GlobalInstruction string
 	Instruction       string
 }
@@ -110,6 +111,7 @@ func (b *Builder) buildRelayInstruction(
 		WorkspaceMode:     workspaceMode,
 		BaseBranch:        baseBranch,
 		RepoBranchAtStart: repoBranch,
+		MemoryEnabled:     b.memoryStore.MemoryEnabled(),
 	}
 	mode := telegramfmt.NormalizeMode(b.telegramFormattingMode)
 	rule, example := telegramfmt.PromptRuleAndExample(mode)

@@ -227,7 +227,8 @@ project:
 - `.config/relay/relay.db` persists owner auth, session metadata, MCP KV, and
   Telegram polling offsets on the host.
 - `.config/relay/MEMORY.md` and optional `.config/relay/SOUL.md` stay on the
-  host and are included in future session-start snapshots when enabled.
+  host. `MEMORY.md` is used when `relay.memory.enabled=true`; `SOUL.md` is
+  always read when present.
 - `.git` stays visible to `relay.workspace.mode=auto|on`, so workspace mode sees
   the same repository as host execution.
 - `relay-home` persists provider CLI auth/config written under `/home/node`.
@@ -321,8 +322,8 @@ relay:
 The relay MCP server (`relay`) is automatically included in all sessions. It provides:
 
 - `relay.state` - persistent key-value storage
-- `relay.memory.read` - read `${relay.state_dir}/MEMORY.md`
-- `relay.memory.remember` - append a durable fact to `${relay.state_dir}/MEMORY.md`
+- `relay.memory.read` - read `${relay.state_dir}/MEMORY.md` when `relay.memory.enabled=true`
+- `relay.memory.remember` - append a durable fact to `${relay.state_dir}/MEMORY.md` when `relay.memory.enabled=true`
 - `relay.workspace.import` - import workspace from base branch
 - `relay.workspace.export` - export workspace to base branch
 
@@ -366,13 +367,15 @@ session-start snapshot. New or restored sessions read the latest file.
 - `relay.sessions.persistence`: `memory|sqlite` (default `memory`)
   - `memory`: ADK conversation/runtime state is process-local; only Relay metadata is persisted.
   - `sqlite`: ADK session events and state are persisted in `relay.db` and reused after restart until `/reset` or explicit `/close`.
-- internal durable memory uses `${relay.state_dir}/MEMORY.md`
+- `relay.memory.enabled`: enable internal durable memory (default `true`)
+  - when disabled, Relay does not snapshot `MEMORY.md`, register `relay.memory.*` MCP tools, or expose `/memory` contents.
+- internal durable memory uses `${relay.state_dir}/MEMORY.md` when `relay.memory.enabled=true`
   - `/memory` reads the current file in owner/collaborator direct messages.
   - `relay.memory.read` reads the file from MCP.
   - `relay.memory.remember` appends facts to the file from MCP.
   - memory is snapshotted into ADK session state when a session starts or restores; active sessions are not refreshed after writes.
 - optional session-start operator instructions use `${relay.state_dir}/SOUL.md`
-  - Relay reads the file on session start/restore when it exists and injects it with the memory snapshot.
+  - Relay reads the file on session start/restore when it exists; this is independent from `relay.memory.enabled`.
   - Relay does not expose MCP mutation for `SOUL.md`; edit the file directly.
 - owner auth token is generated during `relay init`, persisted in `relay.db`, and reused by `relay start`
   - if token is missing in existing state, `relay start` backfills one-time and persists it
@@ -452,7 +455,7 @@ Relay runs with a single provider per process (`relay.provider`).
 - `/close` (DM only, owner/collaborator): resets current session history, then in the owner DM `topic_id=0` stops the owner session; in topic contexts, closes that topic.
 - `/reset` (owner/collaborator): cancels queued work and clears the current session's persisted ADK conversation history without deleting Relay metadata or the workspace branch.
 - `/cancel` (owner/collaborator): cancels active turn and drops queued turns for current session.
-- `/memory` (DM only, owner/collaborator): prints current `${relay.state_dir}/MEMORY.md` contents.
+- `/memory` (DM only, owner/collaborator): prints current `${relay.state_dir}/MEMORY.md` contents when `relay.memory.enabled=true`; otherwise reports that memory is disabled.
 
 ### Session restore/create behavior
 
