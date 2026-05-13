@@ -5,9 +5,9 @@
 
 ## One app. No backing services. No webhook required.
 
-Relay turns Telegram into the control plane for ACP agent sessions in your
-projects. Run it next to your checkout, connect your Telegram bot, and control
-agents from DMs, groups, or topic chats.
+Relay is a lightweight Telegram control plane for coding agents. Point it at a
+project, connect your bot, and run long-lived agent sessions from DMs, groups,
+or topic chats.
 
 Relay does not require Redis, Postgres, object storage, queues, or a public
 webhook endpoint. It persists local state in SQLite, uses Telegram polling by
